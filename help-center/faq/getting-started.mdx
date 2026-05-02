@@ -1,20 +1,87 @@
 ---
-title: Where does this documentation come from?
-description: Clarify that this site is a sample starter kit.
+title: Common Questions
+description: Frequently asked questions about TradeBotX setup, market data, the AI pipeline, and paper trading.
 ---
-## Short answer
 
-This is sample content bundled with the starter kit. It is not your product documentation yet.
+## Setup
 
-## What to do next
+<Expandable title="What do I need before I can run TradeBotX?" default-open="false">
+  - Python 3.12+
+  - Node.js 18+
+  - An Upstox developer account (free at developer.upstox.com) with a registered app
+  - An OpenAI API key for the 13-agent AI pipeline
 
-- Replace each page with your real information.
+  See the [Setup & Installation](/quickstart) page for a full step-by-step guide.
+</Expandable>
 
-- Update navigation labels from dashboard editor or from `documentation.json`.
+<Expandable title="Do I need a funded Upstox trading account?" default-open="false">
+  For live market data (real prices and candles) you need a funded Upstox account. For development, set `UPSTOX_MODE=sandbox` in your `.env` to use simulated data without a live account.
+</Expandable>
 
-- Remove sections you do not plan to maintain.
+<Expandable title="How do I get my Upstox API Key and Secret?" default-open="false">
+  1. Log in at developer.upstox.com.
+  2. Create a new app and set the redirect URI to `http://localhost:8000/callback`.
+  3. Copy the **API Key** and **API Secret** from your app settings into your `.env` file.
+</Expandable>
 
-<Callout kind="info" collapsed="false">
-  If you are unsure where a page comes from, look for its `.mdx` file in this repo and edit it directly.
-</Callout>
+---
 
+## Market Data
+
+<Expandable title="Which stocks does TradeBotX support?" default-open="false">
+  TradeBotX has built-in instrument key mappings for **NIFTY 50** (48 stocks) and **NIFTY BANK** (12 stocks). You can add individual tickers to your custom watchlist for AI analysis, even if they are not in these indices.
+</Expandable>
+
+<Expandable title="Why are some signal scores stuck at 0.5?" default-open="false">
+  The intraday 5-minute candle endpoint returns `404` when the NSE market is closed (weekends and public holidays). This is expected behaviour. The technical engine falls back to SMA-200 as a VWAP substitute, which produces a neutral mid-range score for the VWAP component.
+</Expandable>
+
+<Expandable title="A stock is returning 404 — what do I do?" default-open="false">
+  The instrument ISIN for that stock has likely changed due to a corporate action (stock split, bonus issue, or demerger). Look up the current ISIN on nseindia.com and update the mapping in `upstox_client.py`.
+</Expandable>
+
+<Expandable title="My token expired. How do I refresh it?" default-open="false">
+  Upstox tokens expire at midnight IST every day. To refresh:
+
+  1. Go to `http://localhost:8000/api/upstox/login`
+  2. Log in and authorize the app
+  3. The new token is saved to `.env` automatically — no restart needed
+</Expandable>
+
+---
+
+## AI Pipeline
+
+<Expandable title="How accurate is the AI?" default-open="false">
+  Accuracy depends on market conditions and the LLM model used. The **Predictions** tab in the dashboard tracks the win rate of all past decisions. Typical win rates in backtesting range from 55–65%, but past accuracy does not guarantee future results.
+</Expandable>
+
+<Expandable title="Can I use Claude or Gemini instead of GPT-4?" default-open="false">
+  Yes. Set the provider and model in `tradingagents/default_config.py`. Supported providers are OpenAI, Anthropic (Claude), Google (Gemini), Ollama (local models), and OpenRouter.
+</Expandable>
+
+<Expandable title="How much does each AI analysis cost?" default-open="false">
+  A single full pipeline run (13 agents) typically costs a few cents in OpenAI API tokens at GPT-4 pricing. Cost varies by model and response length.
+</Expandable>
+
+---
+
+## Paper Trading
+
+<Expandable title="Will TradeBotX ever place real trades?" default-open="false">
+  No. TradeBotX is designed exclusively for paper trading — simulated trades stored in a local SQLite database. No orders are ever sent to Upstox or any exchange.
+</Expandable>
+
+<Expandable title="Why was my paper trade rejected?" default-open="false">
+  A trade can be rejected for any of these reasons:
+
+  - Daily loss limit reached (−2% of capital today)
+  - Circuit breaker active (3 consecutive losing trades in the last 30 minutes)
+  - Maximum 5 concurrent positions already open
+  - A position in the same stock is already open
+  - Insufficient available capital for a 5% position
+</Expandable>
+
+<Expandable title="What happens to open positions when the server restarts?" default-open="false">
+  All positions are saved to SQLite and reconstructed on startup. The paper trader will resume monitoring open positions exactly as if the server had never restarted.
+</Expandable>

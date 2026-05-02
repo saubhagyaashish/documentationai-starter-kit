@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python -c \"import json; json.load\\(open\\('D:/documentationai-starter-kit/documentation.json'\\)\\); print\\('JSON is valid'\\)\")"
+      "Bash(python -c \"import json; json.load\\(open\\('D:/documentationai-starter-kit/documentation.json'\\)\\); print\\('JSON is valid'\\)\")",
+      "Bash(python -c \"import json; json.load\\(open\\('D:/documentationai-starter-kit/documentation.json'\\)\\); print\\('JSON valid'\\)\")"
     ]
   }
 }

@@ -1,26 +1,130 @@
 ---
-title: Page Missing in Sidebar
-description: Fix a page that does not appear in navigation.
+title: Troubleshooting
+description: Fix common TradeBotX errors — expired tokens, stale ISINs, rate limits, and more.
 ---
-## Symptoms
 
-- A new page file exists but does not show up in the sidebar.
+## Authentication Errors
 
-- Clicking a nav item shows a 404.
+<Expandable title="401 Unauthorized on every API call" default-open="true">
+  **Cause:** Your Upstox access token has expired. Tokens expire at midnight IST every day.
 
-## Fix
+  **Fix:**
+  1. Navigate to `http://localhost:8000/api/upstox/login` in your browser.
+  2. Log in to Upstox and click **Authorize**.
+  3. The new token is saved to `.env` automatically — no restart needed.
+</Expandable>
 
-<Steps>
-  <Step title="Confirm the file name" icon="file-text" title-type="p">
-    Ensure the file exists.
-  </Step>
+<Expandable title="OAuth callback returns an error" default-open="false">
+  **Cause:** The redirect URI in your Upstox developer app does not match `UPSTOX_REDIRECT_URI` in `.env`.
 
-  <Step title="Update navigation" icon="settings" title-type="p">
-    Add or fix the matching `path` in `documentation.json` or from navigation menu.
-  </Step>
+  **Fix:**
+  1. Go to developer.upstox.com and open your app settings.
+  2. Confirm the redirect URI is set to exactly `http://localhost:8000/callback`.
+  3. Make sure `UPSTOX_REDIRECT_URI=http://localhost:8000/callback` in `.env`.
+</Expandable>
 
-  <Step title="Publish" icon="refresh-cw" title-type="p">
-    Publish so changes take effect.
-  </Step>
-</Steps>
+---
 
+## Market Data Errors
+
+<Expandable title="404 Not Found for a specific stock" default-open="false">
+  **Cause:** The instrument ISIN for that stock has changed due to a corporate action (stock split, bonus issue, or demerger).
+
+  **Fix:**
+  1. Look up the current ISIN for the stock on nseindia.com.
+  2. Find the outdated entry in `upstox_client.py` (search for the stock symbol).
+  3. Replace the old ISIN with the new one in the instrument key mapping.
+</Expandable>
+
+<Expandable title="Intraday signal scores are always around 0.5" default-open="false">
+  **Cause:** The Upstox V3 intraday candle endpoint returns `404` when the NSE market is closed — weekends, public holidays, and outside market hours (9:15 AM – 3:30 PM IST).
+
+  **This is expected behaviour.** The technical engine detects the `404` and falls back to SMA-200 as a VWAP substitute, which tends to produce a neutral score for the VWAP component. Intraday scores will be accurate during market hours on trading days.
+</Expandable>
+
+<Expandable title="Batch LTP returns empty or stale prices" default-open="false">
+  **Cause:** Either the token is expired (see 401 fix above) or the market is closed and Upstox is returning the last-traded price from the previous session.
+
+  **Fix:** Prices outside market hours reflect the previous session's close — this is correct. If prices look wrong during market hours, refresh your token.
+</Expandable>
+
+---
+
+## Backend Startup Errors
+
+<Expandable title="ModuleNotFoundError on startup" default-open="false">
+  **Cause:** The Python virtual environment is not activated.
+
+  **Fix:**
+  ```bash
+  # Windows
+  .\venv\Scripts\activate
+
+  # macOS / Linux
+  source venv/bin/activate
+  ```
+  Then re-run `python api_server.py`.
+</Expandable>
+
+<Expandable title="Port 8000 already in use" default-open="false">
+  **Cause:** Another process (possibly a previous backend instance) is already using port 8000.
+
+  **Fix:**
+  ```bash
+  # Windows — find the process using port 8000
+  netstat -ano | findstr :8000
+  # Kill it by PID
+  taskkill /PID <pid> /F
+
+  # macOS / Linux
+  lsof -i :8000
+  kill -9 <pid>
+  ```
+</Expandable>
+
+---
+
+## AI Pipeline Errors
+
+<Expandable title="RateLimitError from OpenAI" default-open="false">
+  **Cause:** Free-tier OpenAI accounts have low requests-per-minute limits. The 13-agent pipeline makes many sequential LLM calls.
+
+  **Fix options:**
+  - Upgrade your OpenAI plan to increase rate limits.
+  - Add a delay between agent calls in `tradingagents/default_config.py`.
+  - Switch to a provider with higher limits (Anthropic, Google, or a local Ollama model).
+</Expandable>
+
+<Expandable title="Pipeline hangs and never completes" default-open="false">
+  **Cause:** One of the LLM calls timed out or the LLM provider is experiencing an outage.
+
+  **Fix:**
+  1. Check the backend terminal for error messages.
+  2. Try running the pipeline on a simpler ticker via the CLI: `python main.py --ticker TCS`.
+  3. Check the OpenAI / Anthropic status page for outages.
+</Expandable>
+
+---
+
+## Frontend Errors
+
+<Expandable title="Dashboard shows 'Cannot connect to backend'" default-open="false">
+  **Cause:** The FastAPI backend is not running or is not accessible on port 8000.
+
+  **Fix:**
+  1. Check that `python api_server.py` is running in a terminal.
+  2. Open `http://localhost:8000/docs` — if you see the Swagger UI, the backend is up.
+  3. If the frontend runs on a different machine, update the API base URL in `frontend/src/config.ts`.
+</Expandable>
+
+<Expandable title="npm run dev fails with dependency errors" default-open="false">
+  **Cause:** Node modules are missing or outdated.
+
+  **Fix:**
+  ```bash
+  cd frontend
+  rm -rf node_modules
+  npm install
+  npm run dev
+  ```
+</Expandable>

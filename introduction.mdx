@@ -1,78 +1,78 @@
 ---
-title: Set Up Your Documentation
-description: 'A minimal, editable starting point for your own documentation site.'
+title: TradeBotX Overview
+description: AI-powered Indian stock trading platform combining a 13-agent LLM pipeline with live Upstox market data and automated paper trading.
 ---
-## Start here (5–10 minutes)
 
-1. Edit this page so it describes your product and audience.
+## What Is TradeBotX?
 
-2. Customize your onboarding flow in the [Quickstart](/quickstart) page.
+TradeBotX is a full-stack trading intelligence platform built for the **Indian stock market (NSE)**. It combines a 13-agent AI pipeline powered by LLMs with real-time market data from Upstox, automated technical analysis, and a simulated paper trading engine — all accessible through a modern React dashboard.
 
-3. Delete or rewrite any sections and pages you do not plan to use.
+Think of it as your personal AI trading desk: it screens stocks, debates bull vs. bear cases using multiple AI agents, computes technical signals, and can auto-trade in paper mode — without risking real money.
 
-4. Invite a teammate to review the structure and concepts starting from [Core Concepts](/concepts).
-
-<Callout kind="alert" collapsed="false">
-  This site ships with placeholder content. Edit the text, links, and examples so they match your product before sharing it with others.
+<Callout kind="info">
+  TradeBotX is designed for **paper trading only**. No real orders are placed on any exchange. It is a research and strategy-testing tool.
 </Callout>
 
-## What you get
+## Why TradeBotX?
 
-<Columns cols="3">
-  <Card title="Docs structure" href="/quickstart" icon="book-open" horizontal="false">
-    A clear navigation layout with starter pages you can rename or replace.
+| Problem | TradeBotX Solution |
+|---|---|
+| Manual stock research takes hours | 13 AI agents analyse a stock in ~2 minutes |
+| Emotional trading decisions | Data-driven composite signal scores (0.0–1.0) |
+| Missing market moves | Auto-scanner monitors NIFTY 50 every 5 minutes |
+| No way to test strategies | Paper trading with full risk management |
+| Expensive trading terminals | Free, self-hosted, open-source |
+| Information overload | Curated analysis: macro, fundamentals, sentiment, technicals |
+
+## Key Capabilities
+
+<Columns cols={2}>
+  <Card title="13-Agent AI Pipeline" icon="cpu" href="/components/callouts">
+    LangGraph multi-agent system producing BUY / SELL / HOLD decisions in ~2 minutes per stock.
   </Card>
-
-  <Card title="Components" href="#try-a-few-components" icon="layout-grid" horizontal="false" target="_self">
-    Prebuilt blocks like Callouts, Steps, Tabs, and Cards to keep pages clean.
+  <Card title="Live Market Data" icon="trending-up" href="/authentication">
+    Real-time LTP, OHLCV candles, and WebSocket tick feed via Upstox V2/V3 API.
   </Card>
-
-  <Card title="API reference hook" href="/authentication" icon="code" horizontal="false">
-    A placeholder `openapi.yaml` you can swap with your real API spec.
+  <Card title="Technical Indicator Engine" icon="bar-chart-2" href="/components/cards">
+    RSI, MACD, VWAP, Bollinger Bands, EMA, Volume Surge — computed locally with no external TA library.
   </Card>
-</Columns>
-
-## Make your first edit
-
-<Steps>
-  <Step title="Rewrite this page" icon="edit" title-type="p">
-    Update the title, description, and sections in `introduction` so they reflect your product and documentation goals.
-  </Step>
-
-  <Step title="Customize Quickstart" icon="zap" title-type="p">
-    Replace the steps in `quickstart` with your real onboarding flow so new readers know exactly how to get started.
-  </Step>
-
-  <Step title="Remove or repurpose samples" icon="trash" title-type="p">
-    Delete unused sample sections and pages, or rewrite them with your own content to keep navigation focused.
-  </Step>
-</Steps>
-
-## Try a few components
-
-You can browse the component gallery in the [Components](/components) page for ready-to-use examples of Cards, Callouts, Steps, Tabs, and more.
-
-## Continue to the rest of the sample
-
-<Columns cols="2">
-  <Card title="Quickstart" href="/quickstart" icon="zap" horizontal="false">
-    See the minimal setup flow.
+  <Card title="Paper Trading Engine" icon="dollar-sign" href="/components/images">
+    Simulated trades with stop-loss, take-profit, trailing stops, and time-based exits.
   </Card>
-
-  <Card title="Core Concepts" href="/concepts" icon="layers" horizontal="false">
-    Learn how pages, navigation, and components fit together.
+  <Card title="Auto-Scanner" icon="scan" href="/components/code">
+    Scheduled bot that screens NIFTY 50 every 5 minutes and auto-enters/exits paper positions.
   </Card>
-
-  <Card title="Components" href="/components" icon="code" horizontal="false">
-    A small gallery of built-in components.
-  </Card>
-
-  <Card title="Authentication" href="/authentication" icon="lock" horizontal="false">
-    Example layout for an auth guide.
-  </Card>
-
-  <Card title="Help Center" href="/help-center" icon="help-circle" horizontal="false">
-    Starter FAQ, guides, and troubleshooting templates.
+  <Card title="Prediction Tracker" icon="check-circle" href="/components/tabs">
+    SQLite-backed accuracy tracking for every AI decision made.
   </Card>
 </Columns>
 
+## The React Dashboard
+
+The frontend has six tabs, each serving a distinct purpose:
+
+| Tab | Purpose |
+|---|---|
+| **Screener** | NSE index stock screener with flagged stocks |
+| **Analysis** | Live agent pipeline progress and final results |
+| **Paper Trading** | Live prices, signal table, portfolio, trade history |
+| **Watchlist** | Custom ticker list and batch analysis launcher |
+| **Predictions** | AI decision accuracy tracking dashboard |
+| **Results** | Historical analysis results browser |
+
+## Where to Go Next
+
+<Columns cols={2}>
+  <Card title="Setup & Installation" href="/quickstart" icon="zap" horizontal>
+    Get TradeBotX running locally in under 10 minutes.
+  </Card>
+  <Card title="System Architecture" href="/concepts" icon="git-branch" horizontal>
+    Understand how all components connect.
+  </Card>
+  <Card title="AI Agent Pipeline" href="/components/callouts" icon="cpu" horizontal>
+    Deep dive into the 13 agents and their roles.
+  </Card>
+  <Card title="Upstox Integration" href="/authentication" icon="link" horizontal>
+    OAuth flow, API endpoints, and instrument key mapping.
+  </Card>
+</Columns>

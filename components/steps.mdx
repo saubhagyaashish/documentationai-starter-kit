@@ -1,26 +1,117 @@
 ---
-title: Steps
-description: Guide users through linear, task-based flows.
+title: API Endpoints
+description: Complete reference for all TradeBotX REST endpoints — market data, AI analysis, paper trading, auto-scanner, watchlist, and authentication.
 ---
 
-# Steps
+## Base URL
 
-Steps show a linear flow for setup and tutorials.
+```
+http://localhost:8000
+```
 
-## Example
+Interactive docs are available at **http://localhost:8000/docs** (Swagger UI) and **http://localhost:8000/redoc**.
 
-<Steps>
-  <Step title="Install dependencies" icon="download">
-    Run the installation command to add required packages to your project.
-  </Step>
-  <Step title="Configure settings" icon="settings">
-    Create a configuration file in your project root with your API credentials.
-  </Step>
-  <Step title="Deploy documentation" icon="rocket">
-    Push your changes and deploy to production.
-  </Step>
-</Steps>
+---
 
-## Learn more
+## Market Data
 
-Read the full Steps guide at https://documentation.ai/docs/components/steps.
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/upstox/ltp/batch?index=NIFTY50` | Live prices for all index stocks in one call |
+| `GET` | `/api/upstox/ltp/{symbol}` | Live price for a single stock |
+| `GET` | `/api/upstox/quote/{symbol}` | Full OHLCV + market depth |
+| `GET` | `/api/upstox/candles/{symbol}` | Historical daily candles |
+| `GET` | `/api/upstox/signals/{symbol}` | Composite technical signal score |
+| `GET` | `/api/upstox/movers` | Top movers by % change |
+| `GET` | `/api/upstox/instruments` | All supported symbol → ISIN mappings |
+
+### Signal Response
+
+```json
+GET /api/upstox/signals/RELIANCE
+
+{
+  "symbol": "RELIANCE",
+  "score": 0.71,
+  "signal": "BUY",
+  "indicators": {
+    "rsi": 42.3,
+    "macd_histogram": 8.5,
+    "vwap": 2930.0,
+    "price": 2945.5,
+    "ema20": 2910.0,
+    "ema50": 2870.0,
+    "volume_surge": true,
+    "atr": 45.2
+  },
+  "trend": "uptrend"
+}
+```
+
+---
+
+## AI Analysis
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/analyze/stream` | SSE stream — live 13-agent pipeline |
+| `POST` | `/api/analyze/batch` | Batch analyse multiple tickers |
+| `GET` | `/api/screen` | NSE index screener with flagged stocks |
+| `GET` | `/api/indices` | Available NSE indices |
+| `GET` | `/api/results` | Historical analysis results |
+
+### SSE Stream Events
+
+```bash
+curl -N "http://localhost:8000/api/analyze/stream?ticker=RELIANCE"
+
+event: progress
+data: {"agent": "market_analyst", "status": "complete", "pct": 15}
+
+event: result
+data: {"decision": "BUY", "rating": 0.78, "reports": {...}}
+```
+
+---
+
+## Paper Trading
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/paper/portfolio` | Open positions, capital, daily and total P&L |
+| `POST` | `/api/paper/buy` | Enter a paper trade |
+| `POST` | `/api/paper/sell` | Exit a paper trade |
+| `GET` | `/api/paper/history` | All closed trades |
+| `GET` | `/api/paper/performance` | Win rate and P&L statistics |
+
+---
+
+## Auto-Scanner
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/scanner/status` | Scanner state, last scan time, last signals |
+| `POST` | `/api/scanner/start` | Start the auto-trading bot |
+| `POST` | `/api/scanner/stop` | Stop the auto-trading bot |
+| `POST` | `/api/scanner/scan-now` | Trigger an immediate scan cycle |
+| `POST` | `/api/scanner/config` | Update scanner settings |
+
+---
+
+## Watchlist
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/watchlist/custom` | Get the custom ticker list |
+| `POST` | `/api/watchlist/custom` | Add a ticker |
+| `DELETE` | `/api/watchlist/custom/{ticker}` | Remove a ticker |
+
+---
+
+## Authentication
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/upstox/login` | Generate OAuth login URL and redirect |
+| `GET` | `/callback` | OAuth redirect handler — saves new token to `.env` |
+| `GET` | `/api/upstox/token-status` | Check whether the current token is valid |

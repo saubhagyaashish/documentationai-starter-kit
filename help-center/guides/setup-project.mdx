@@ -1,20 +1,155 @@
 ---
-title: Create Your First Doc Page
-description: A short guide to adding a new page to this starter kit.
+title: Setup Guide
+description: Detailed walkthrough for installing TradeBotX, creating your Upstox developer app, and running both the backend and frontend.
 ---
+
 ## Overview
 
-Use this guide as a sample for your real setup instructions.
+This guide covers everything from creating your Upstox developer app to opening the TradeBotX dashboard for the first time. It takes about 15–20 minutes on a fresh machine.
 
-## Steps
+## Step 1 — Create Your Upstox Developer App
+
+Before installing any code, you need an Upstox developer app to get your API credentials.
 
 <Steps>
-  <Step title="Create a new file" icon="file-plus" title-type="p">
-    Add a page using + and start with a title and short description.
+  <Step title="Sign in to Upstox Developer Portal" icon="external-link" title-type="p">
+    Go to developer.upstox.com and sign in with your Upstox trading account credentials.
   </Step>
+  <Step title="Create a new app" icon="plus" title-type="p">
+    Click **Create App**. Give it a name (e.g., "TradeBotX") and set the **Redirect URI** to exactly:
 
-  <Step title="Write the first section" icon="edit" title-type="p">
-    Add a simple header and a few sentences users can scan quickly.
+    ```
+    http://localhost:8000/callback
+    ```
+  </Step>
+  <Step title="Copy your credentials" icon="copy" title-type="p">
+    From your app's settings page, copy the **API Key** and **API Secret**. You will need these in Step 4.
   </Step>
 </Steps>
 
+## Step 2 — Clone and Install
+
+<Steps>
+  <Step title="Clone the repository" icon="download" title-type="p">
+    ```bash
+    git clone https://github.com/your-org/tradebotx.git
+    cd tradebotx
+    ```
+  </Step>
+  <Step title="Create a Python virtual environment" icon="box" title-type="p">
+    <Tabs>
+      <Tab title="Windows" icon="monitor">
+        ```bash
+        python -m venv venv
+        .\venv\Scripts\activate
+        ```
+      </Tab>
+      <Tab title="macOS / Linux" icon="terminal">
+        ```bash
+        python -m venv venv
+        source venv/bin/activate
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+  <Step title="Install Python dependencies" icon="package" title-type="p">
+    ```bash
+    pip install -r requirements.txt
+    ```
+    This installs FastAPI, LangGraph, the Upstox SDK, pandas, and all other dependencies.
+  </Step>
+  <Step title="Install frontend dependencies" icon="layers" title-type="p">
+    ```bash
+    cd frontend
+    npm install
+    cd ..
+    ```
+  </Step>
+</Steps>
+
+## Step 3 — Configure Environment Variables
+
+```bash
+cp .env.example .env
+```
+
+Open `.env` in a text editor and fill in the values:
+
+```env
+# Your OpenAI API key
+OPENAI_API_KEY=sk-proj-...
+
+# From your Upstox developer app (Step 1)
+UPSTOX_API_KEY=9e6b9529-...
+UPSTOX_API_SECRET=zfzQ8g...
+UPSTOX_REDIRECT_URI=http://localhost:8000/callback
+UPSTOX_MODE=live
+
+# Leave blank — the OAuth flow will fill this in automatically
+UPSTOX_ACCESS_TOKEN=
+```
+
+<Callout kind="tip">
+  If you don't have an OpenAI key yet, set `OPENAI_API_KEY=` to blank. The market data features and paper trading will still work — only the AI analysis pipeline will be unavailable.
+</Callout>
+
+## Step 4 — Start the Backend and Frontend
+
+Open **two terminal windows** and run one command in each:
+
+**Terminal 1 — Backend:**
+```bash
+# Make sure the virtual environment is activated
+python api_server.py
+```
+
+You should see:
+```
+INFO:     Started server process
+INFO:     Uvicorn running on http://0.0.0.0:8000
+```
+
+**Terminal 2 — Frontend:**
+```bash
+cd frontend
+npm run dev
+```
+
+You should see:
+```
+  VITE v5.x.x  ready in 400ms
+  ➜  Local:   http://localhost:5173/
+```
+
+## Step 5 — Authenticate with Upstox
+
+<Steps>
+  <Step title="Open the login URL" icon="external-link" title-type="p">
+    In your browser, navigate to **http://localhost:8000/api/upstox/login**.
+  </Step>
+  <Step title="Log in and authorize" icon="lock" title-type="p">
+    You will be redirected to Upstox's login page. Enter your credentials and click **Authorize**.
+  </Step>
+  <Step title="Confirm token was saved" icon="check-circle" title-type="p">
+    After authorizing, you'll be redirected back and see a success message. Your `.env` now has a valid `UPSTOX_ACCESS_TOKEN`.
+  </Step>
+</Steps>
+
+## Step 6 — Open the Dashboard
+
+Navigate to **http://localhost:5173** in your browser.
+
+The dashboard should load with live prices in the **Paper Trading** tab. If you see a connection error, check that both the backend (port 8000) and frontend (port 5173) terminals are running.
+
+## Daily Startup Routine
+
+After the initial setup, each trading day you only need to:
+
+1. Activate the virtual environment and run `python api_server.py`
+2. Run `npm run dev` in the `frontend/` directory
+3. Visit `http://localhost:8000/api/upstox/login` once to refresh the daily token
+4. Open `http://localhost:5173`
+
+<Callout kind="info">
+  You can automate steps 1–2 with a simple shell script or Windows batch file so both services start with a single command.
+</Callout>

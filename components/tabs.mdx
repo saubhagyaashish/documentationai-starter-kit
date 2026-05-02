@@ -1,38 +1,163 @@
 ---
-title: Tabs
-description: Organize variants like languages or platforms.
+title: Database Schema
+description: SQLite tables used by TradeBotX — predictions, paper trades, and daily portfolio snapshots.
 ---
 
-# Tabs
+## Overview
 
-Tabs group related variants like language or platform.
+TradeBotX uses **SQLite** for all persistent storage. The database file (`tradebotx.db`) is created automatically in the project root on first run. There are three tables — one for AI predictions, one for paper trades, and one for daily portfolio snapshots.
 
-## Example
+All queries go through `database.py` using Python's built-in `sqlite3` module. No ORM is used.
+
+---
+
+## Table: `predictions`
+
+Stores every AI pipeline result.
+
+```sql
+CREATE TABLE predictions (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticker              TEXT NOT NULL,
+    trade_date          TEXT NOT NULL,          -- YYYY-MM-DD
+    decision            TEXT NOT NULL,          -- BUY | SELL | HOLD
+    rating              REAL,                   -- 0.0–1.0 confidence score
+    price_at_prediction REAL,
+    current_price       REAL,                   -- price when outcome was checked
+    return_pct          REAL,
+    is_win              INTEGER,                -- 1 = correct, 0 = wrong, NULL = unchecked
+    outcome_checked_at  TEXT,
+    reports_json        TEXT,                   -- full agent reports as JSON
+    created_at          TEXT DEFAULT (datetime('now'))
+);
+```
+
+| Column | Description |
+|---|---|
+| `rating` | Portfolio Manager's confidence score (0.0–1.0) |
+| `is_win` | `1` if decision proved correct, `0` if wrong, `NULL` if not yet checked |
+| `reports_json` | Full JSON of all 13 agent reports — useful for audit and review |
+
+---
+
+## Table: `paper_trades`
+
+One row per paper trade — both open and closed positions.
+
+```sql
+CREATE TABLE paper_trades (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol          TEXT NOT NULL,
+    instrument_key  TEXT NOT NULL,
+    side            TEXT NOT NULL,              -- BUY | SELL
+    quantity        INTEGER NOT NULL,
+    entry_price     REAL NOT NULL,
+    exit_price      REAL,                       -- NULL while open
+    entry_time      TEXT NOT NULL,
+    exit_time       TEXT,                       -- NULL while open
+    stop_loss       REAL,
+    target_price    REAL,
+    pnl             REAL,                       -- NULL while open
+    pnl_pct         REAL,
+    is_win          INTEGER,
+    exit_reason     TEXT,                       -- STOP_LOSS | TARGET | TRAILING_STOP
+                                                --   TIME_EXIT | SIGNAL_WEAK | MANUAL
+    strategy        TEXT,                       -- "auto_scanner" | "manual"
+    signal_context  TEXT,                       -- JSON snapshot of indicators at entry
+    created_at      TEXT DEFAULT (datetime('now'))
+);
+```
+
+| Column | Description |
+|---|---|
+| `exit_price` / `exit_time` | `NULL` while the position is still open |
+| `exit_reason` | Why the position was closed — useful for strategy analysis |
+| `signal_context` | Snapshot of all indicator values at the time of entry |
+| `strategy` | `"auto_scanner"` for bot trades, `"manual"` for user-initiated trades |
+
+---
+
+## Table: `paper_portfolio`
+
+Daily portfolio snapshots for P&L charting.
+
+```sql
+CREATE TABLE paper_portfolio (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    date            TEXT NOT NULL UNIQUE,       -- YYYY-MM-DD
+    capital         REAL NOT NULL,
+    daily_pnl       REAL DEFAULT 0,
+    total_pnl       REAL DEFAULT 0,
+    open_positions  INTEGER DEFAULT 0,
+    daily_trades    INTEGER DEFAULT 0,
+    daily_wins      INTEGER DEFAULT 0,
+    daily_losses    INTEGER DEFAULT 0,
+    win_rate        REAL DEFAULT 0,
+    created_at      TEXT DEFAULT (datetime('now'))
+);
+```
+
+---
+
+## Useful Queries
 
 <Tabs>
-  <Tab title="macOS" icon="apple">
-    Install using Homebrew for the best experience on macOS.
-
-    ```bash
-    brew install documentation-ai
+  <Tab title="Win Rate" icon="percent">
+    ```sql
+    -- Overall prediction win rate
+    SELECT
+      COUNT(*) AS total,
+      SUM(is_win) AS wins,
+      ROUND(100.0 * SUM(is_win) / COUNT(*), 1) AS win_rate_pct
+    FROM predictions
+    WHERE is_win IS NOT NULL;
     ```
   </Tab>
-  <Tab title="Windows" icon="monitor">
-    Download and run the Windows installer from the releases page.
-
-    ```bash
-    winget install documentation-ai
+  <Tab title="Open Positions" icon="list">
+    ```sql
+    -- All currently open paper positions
+    SELECT symbol, entry_price, stop_loss, target_price, entry_time
+    FROM paper_trades
+    WHERE exit_time IS NULL;
     ```
   </Tab>
-  <Tab title="Linux" icon="terminal">
-    Use your package manager or download the binary directly.
-
-    ```bash
-    sudo apt install documentation-ai
+  <Tab title="Exit Reasons" icon="bar-chart">
+    ```sql
+    -- Most common exit reasons
+    SELECT exit_reason, COUNT(*) AS count
+    FROM paper_trades
+    WHERE exit_time IS NOT NULL
+    GROUP BY exit_reason
+    ORDER BY count DESC;
+    ```
+  </Tab>
+  <Tab title="Per-Stock Accuracy" icon="trending-up">
+    ```sql
+    -- Win rate by ticker
+    SELECT ticker,
+      COUNT(*) AS calls,
+      SUM(is_win) AS wins,
+      ROUND(100.0 * SUM(is_win) / COUNT(*), 1) AS win_pct
+    FROM predictions
+    WHERE is_win IS NOT NULL
+    GROUP BY ticker
+    ORDER BY win_pct DESC;
     ```
   </Tab>
 </Tabs>
 
-## Learn more
+---
 
-Read the full Tabs guide at https://documentation.ai/docs/components/tabs.
+## Backup and Reset
+
+```bash
+# Back up before changes
+cp tradebotx.db tradebotx.db.bak
+
+# Reset paper trading (keeps all AI predictions)
+sqlite3 tradebotx.db "DELETE FROM paper_trades; DELETE FROM paper_portfolio;"
+```
+
+<Callout kind="alert">
+  Resetting paper trades also resets the circuit breaker and daily loss counters, since both are reconstructed from the trade table on startup.
+</Callout>

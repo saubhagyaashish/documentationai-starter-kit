@@ -1,33 +1,47 @@
 ---
-title: Help Center (Sample)
+title: TradeBotX Help Center
 ---
 
-<Callout kind="alert">
-This Help Center is sample content. Replace the cards and contact details with your real support paths.
-</Callout>
-
 <Columns cols={2}>
-  <Card title="FAQs" icon="help-circle" href="/help-center/faq/getting-started" horizontal>
-    Starter answers you can rewrite.
+  <Card title="Common Questions" icon="help-circle" href="/help-center/faq/getting-started" horizontal>
+    Answers to the most frequently asked questions about setup, data, and trading.
   </Card>
   <Card title="Troubleshooting" icon="alert-triangle" href="/help-center/troubleshooting/install-error" horizontal>
-    Common issues and fixes.
+    Fix common errors — expired tokens, stale ISINs, and more.
   </Card>
-  <Card title="Guides" icon="book-open" href="/help-center/guides/setup-project" horizontal>
-    How-to guides for setup and onboarding.
+  <Card title="Setup Guide" icon="book-open" href="/help-center/guides/setup-project" horizontal>
+    Step-by-step guide to installing TradeBotX and connecting Upstox.
   </Card>
-  <Card title="Changelog" icon="clock" href="/changelog" horizontal>
-    Track updates after you go live.
+  <Card title="Roadmap" icon="map" href="/changelog" horizontal>
+    Known limitations and planned enhancements.
   </Card>
 </Columns>
 
-## Contact Support
+## Quick Answers
+
+<Expandable title="Do I need a live Upstox trading account?" default-open="false">
+  Yes, for live market data you need a funded Upstox account and a developer app. For development and testing, set `UPSTOX_MODE=sandbox` in your `.env` to use simulated data without a live account.
+</Expandable>
+
+<Expandable title="Will TradeBotX place real trades?" default-open="false">
+  No. TradeBotX is designed exclusively for paper trading. It simulates trades in SQLite without sending any orders to Upstox or any exchange.
+</Expandable>
+
+<Expandable title="My Upstox token expired. What do I do?" default-open="false">
+  Navigate to `http://localhost:8000/api/upstox/login` in your browser, log in to Upstox, and authorize the app. The new token is saved to `.env` automatically — no server restart needed.
+</Expandable>
+
+<Expandable title="How much does it cost to run TradeBotX?" default-open="false">
+  The software itself is free and open-source. You will need an OpenAI API key (billed per token) and an Upstox developer account (free tier available). Running one AI analysis typically costs a few cents in OpenAI tokens.
+</Expandable>
+
+## Contact & Community
 
 <Columns cols={2}>
-  <Card title="Email Support" icon="mail" href="mailto:support@yourcompany.com">
-    Replace with your support email.
+  <Card title="GitHub Issues" icon="github" href="https://github.com/your-org/tradebotx/issues" target="_blank">
+    Report bugs or request features.
   </Card>
-  <Card title="Community" icon="users" href="https://community.yourcompany.com" target="_blank">
-    Link to your community space.
+  <Card title="Discussions" icon="users" href="https://github.com/your-org/tradebotx/discussions" target="_blank">
+    Ask questions and share strategies with the community.
   </Card>
 </Columns>

@@ -1,5 +1,5 @@
 {
-  "name": "Starter Kit",
+  "name": "TradeBotX",
   "colors": {
     "light": {
       "brand": "#F97316"
@@ -15,59 +15,76 @@
         "icon": "book",
         "groups": [
           {
-            "group": "Start Here",
+            "group": "Getting Started",
             "icon": "rocket",
             "pages": [
               {
-                "title": "Introduction",
+                "title": "Overview",
                 "path": "introduction",
                 "icon": "home"
               },
               {
-                "title": "Quickstart",
+                "title": "Setup & Installation",
                 "path": "quickstart",
                 "icon": "zap"
-              },
-              {
-                "title": "Components",
-                "path": "components",
-                "icon": "code"
               }
             ]
           },
           {
-            "group": "Components",
+            "group": "Core Systems",
             "icon": "layers",
             "pages": [
               {
-                "title": "Images",
-                "path": "components/images",
-                "icon": "image"
+                "title": "System Architecture",
+                "path": "concepts",
+                "icon": "git-branch"
               },
               {
-                "title": "Cards",
+                "title": "AI Agent Pipeline",
+                "path": "components/callouts",
+                "icon": "cpu"
+              },
+              {
+                "title": "Technical Indicators",
                 "path": "components/cards",
-                "icon": "square"
+                "icon": "bar-chart-2"
               },
               {
-                "title": "Code",
+                "title": "Auto-Scanner",
                 "path": "components/code",
+                "icon": "scan"
+              }
+            ]
+          },
+          {
+            "group": "Integrations",
+            "icon": "plug",
+            "pages": [
+              {
+                "title": "Upstox Integration",
+                "path": "authentication",
+                "icon": "link"
+              },
+              {
+                "title": "Paper Trading",
+                "path": "components/images",
+                "icon": "dollar-sign"
+              }
+            ]
+          },
+          {
+            "group": "Reference",
+            "icon": "book-open",
+            "pages": [
+              {
+                "title": "API Endpoints",
+                "path": "components/steps",
                 "icon": "code"
               },
               {
-                "title": "Callouts",
-                "path": "components/callouts",
-                "icon": "message-square"
-              },
-              {
-                "title": "Steps",
-                "path": "components/steps",
-                "icon": "list-ordered"
-              },
-              {
-                "title": "Tabs",
+                "title": "Database Schema",
                 "path": "components/tabs",
-                "icon": "columns"
+                "icon": "database"
               }
             ]
           }
@@ -82,14 +99,14 @@
             "icon": "file-text",
             "pages": [
               {
-                "title": "Authentication",
+                "title": "Upstox Auth",
                 "path": "authentication",
                 "icon": "lock"
               }
             ]
           },
           {
-            "group": "Sample Endpoints",
+            "group": "Endpoints",
             "openapi": "openapi.yaml"
           }
         ]
@@ -109,7 +126,7 @@
             "expandable": false,
             "pages": [
               {
-                "title": "Documentation Source",
+                "title": "Common Questions",
                 "path": "help-center/faq/getting-started"
               }
             ]
@@ -120,7 +137,7 @@
             "expandable": false,
             "pages": [
               {
-                "title": "Page Missing in Sidebar",
+                "title": "Common Errors",
                 "path": "help-center/troubleshooting/install-error"
               }
             ]
@@ -131,7 +148,7 @@
             "expandable": false,
             "pages": [
               {
-                "title": "Create Your First Page",
+                "title": "Setup Guide",
                 "path": "help-center/guides/setup-project"
               }
             ]
@@ -140,97 +157,12 @@
       },
       {
         "tab": "Changelog",
-        "icon": "clock",
+        "icon": "map",
         "pages": [
           {
-            "title": "Changelog",
+            "title": "Roadmap & Limitations",
             "path": "changelog",
-            "icon": "history"
-          }
-        ]
-      },
-      {
-        "tab": "TradeBotX",
-        "icon": "trending-up",
-        "groups": [
-          {
-            "group": "Getting Started",
-            "icon": "rocket",
-            "pages": [
-              {
-                "title": "Overview",
-                "path": "tradebotx/overview",
-                "icon": "home"
-              },
-              {
-                "title": "Setup & Installation",
-                "path": "tradebotx/setup",
-                "icon": "settings"
-              }
-            ]
-          },
-          {
-            "group": "Core Systems",
-            "icon": "layers",
-            "pages": [
-              {
-                "title": "System Architecture",
-                "path": "tradebotx/architecture",
-                "icon": "git-branch"
-              },
-              {
-                "title": "AI Agent Pipeline",
-                "path": "tradebotx/ai-pipeline",
-                "icon": "cpu"
-              },
-              {
-                "title": "Technical Indicators",
-                "path": "tradebotx/technical-indicators",
-                "icon": "bar-chart-2"
-              },
-              {
-                "title": "Auto-Scanner",
-                "path": "tradebotx/auto-scanner",
-                "icon": "scan"
-              }
-            ]
-          },
-          {
-            "group": "Integrations",
-            "icon": "plug",
-            "pages": [
-              {
-                "title": "Upstox Integration",
-                "path": "tradebotx/upstox-integration",
-                "icon": "link"
-              },
-              {
-                "title": "Paper Trading",
-                "path": "tradebotx/paper-trading",
-                "icon": "dollar-sign"
-              }
-            ]
-          },
-          {
-            "group": "Reference",
-            "icon": "book-open",
-            "pages": [
-              {
-                "title": "API Endpoints",
-                "path": "tradebotx/api-reference",
-                "icon": "code"
-              },
-              {
-                "title": "Database Schema",
-                "path": "tradebotx/database",
-                "icon": "database"
-              },
-              {
-                "title": "Roadmap & Limitations",
-                "path": "tradebotx/roadmap",
-                "icon": "map"
-              }
-            ]
+            "icon": "map"
           }
         ]
       }

@@ -1,22 +1,90 @@
 ---
-title: Sample Changelog
-description: Sample release notes you can replace with your real updates.
+title: Roadmap & Known Limitations
+description: Current limitations, short-term improvements, and the long-term vision for TradeBotX.
 ---
 
-## Sample updates
+## Known Limitations
 
-<Callout kind="alert">
-This changelog is example content. Replace every entry with your real releases.
+These are the current constraints you should be aware of before using TradeBotX in a live environment:
+
+| Limitation | Impact | Workaround |
+|---|---|---|
+| **Daily token expiry** | Upstox tokens expire at midnight IST every day | Run the OAuth flow once each morning at `/api/upstox/login` |
+| **Intraday 404s** | The V3 intraday candle endpoint returns `404` when the market is closed | Expected — the engine falls back to SMA-200 as a VWAP substitute |
+| **Hardcoded ISINs** | Instrument key mappings may go stale after corporate actions (splits, bonus issues) | Manually update `upstox_client.py` with the current ISIN from nseindia.com |
+| **Single-user** | No authentication layer — the server is open to anyone on the local network | Run behind a firewall or on localhost only |
+| **Paper trading only** | No real order execution | By design — validate your strategy before considering live trading |
+
+---
+
+## Short-Term Enhancements
+
+<Columns cols={2}>
+  <Card title="Dynamic ISIN loader" icon="refresh-cw">
+    Download the full Upstox instruments JSON daily and auto-update mappings — no more stale ISINs after corporate actions.
+  </Card>
+  <Card title="Batch signal endpoint" icon="layers">
+    A single endpoint to compute signals for all NIFTY 50 stocks in parallel, replacing the per-stock calls in the signal table.
+  </Card>
+  <Card title="WebSocket price streaming" icon="radio">
+    Replace the 30-second polling interval in the Paper Trading view with real-time tick updates via the Upstox WebSocket feed.
+  </Card>
+  <Card title="Multi-LLM selector in UI" icon="cpu">
+    A dropdown to switch the AI pipeline between GPT-4, Claude, and Gemini without editing config files.
+  </Card>
+  <Card title="Richer predictions dashboard" icon="bar-chart-2">
+    Win rate trends over time, accuracy by market condition (uptrend/downtrend), and per-agent accuracy attribution.
+  </Card>
+  <Card title="Alert notifications" icon="bell">
+    Telegram or Discord notifications when the auto-scanner enters or exits a position, or detects a strong signal.
+  </Card>
+</Columns>
+
+---
+
+## Medium-Term Enhancements
+
+| Enhancement | Benefit |
+|---|---|
+| **Backtesting engine** | Run any signal strategy against historical data before deploying it live |
+| **Options chain analysis** | IV percentile, max pain levels, put-call ratio for options traders |
+| **Portfolio heatmap** | Visual sector allocation view to spot concentration risk |
+| **Mobile-responsive UI** | Full support for monitoring and trading on mobile devices |
+| **Strategy builder** | Configure custom indicator combinations and thresholds without editing code |
+
+---
+
+## Long-Term Vision
+
+| Enhancement | Benefit |
+|---|---|
+| **Live order execution** | Graduate from paper trading to real Upstox orders with proper risk controls |
+| **Multi-exchange support** | BSE, MCX (commodities), and crypto exchange integration |
+| **AI memory system** | Agents learn from past prediction accuracy and adapt their analysis over time |
+| **Strategy marketplace** | Share and import community-built signal configurations |
+| **Cloud deployment** | Kubernetes-hosted multi-tenant version with per-user portfolios |
+
+---
+
+## Contributing
+
+<Steps>
+  <Step title="Fork and clone" icon="git-branch" title-type="p">
+    Fork the repository on GitHub and clone your fork locally.
+  </Step>
+  <Step title="Create a feature branch" icon="git-merge" title-type="p">
+    ```bash
+    git checkout -b feature/your-feature-name
+    ```
+  </Step>
+  <Step title="Make focused changes" icon="edit" title-type="p">
+    Keep each PR to a single concern. Add tests for new indicator logic in `technical.py`.
+  </Step>
+  <Step title="Open a pull request" icon="upload" title-type="p">
+    Describe what changed and why. Include before/after screenshots for any UI changes.
+  </Step>
+</Steps>
+
+<Callout kind="tip">
+  The highest-value contributions right now are the **dynamic ISIN loader** and **batch signal endpoint** — both well-scoped with clear acceptance criteria.
 </Callout>
-
-<Update label="2026-01-26" description="Sample Update" tags={["sample"]}>
-## What changed
-- Cleaned up placeholder copy across the starter kit.
-- Added clearer "sample" messaging to avoid confusion.
-</Update>
-
-<Update label="2025-12-10" description="Sample Update" tags={["sample"]}>
-## What changed
-- Simplified the Quickstart steps.
-- Trimmed Help Center examples.
-</Update>

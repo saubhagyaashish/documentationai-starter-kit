@@ -1,57 +1,124 @@
 ---
-title: Authentication (Sample)
-description: Sample guidance for authentication and OpenAPI usage.
+title: Upstox Integration
+description: OAuth 2.0 authentication, all API endpoints used, WebSocket feed, instrument key mapping, and rate limits for the Upstox V2/V3 integration.
 ---
 
 ## Overview
 
-This is sample content. Replace tokens, URLs, headers, and flows with your real authentication requirements.
+TradeBotX uses **Upstox V2 and V3 APIs** as its exclusive source of live Indian market data. All market-data features — live prices, candles, intraday data, and real-time streaming — go through Upstox.
 
-<Callout kind="info">
-
-This site ships with placeholder content for authentication. Update this page and `openapi.yaml` to match your real API before sharing with users.
-
-</Callout>
-
-This API uses OpenAPI to describe endpoints, parameters, and responses. The reference is generated from `openapi.yaml`, so keep that file up to date as your API evolves.
+| File | Responsibility |
+|---|---|
+| `upstox_auth.py` | OAuth 2.0 token management |
+| `upstox_client.py` | REST API wrapper for market data |
+| `upstox_ws.py` | WebSocket feed for real-time ticks |
 
 ## Authentication
 
-Use a bearer token in the `Authorization` header for authenticated requests. Replace the base URL and token with values for your own API.
+Upstox uses **OAuth 2.0 with a daily-expiring JWT**. Tokens expire at **midnight IST** every day.
+
+<Steps>
+  <Step title="Open the login URL" icon="external-link" title-type="p">
+    Navigate to `http://localhost:8000/api/upstox/login`. TradeBotX generates the Upstox OAuth authorization URL and redirects you there.
+  </Step>
+  <Step title="Authorize in Upstox" icon="lock" title-type="p">
+    Log in to your Upstox account and click **Authorize**. Upstox redirects you back to the callback URL.
+  </Step>
+  <Step title="Token saved automatically" icon="save" title-type="p">
+    The callback handler exchanges the authorization code for a JWT and saves it to your `.env`. No server restart needed.
+  </Step>
+</Steps>
+
+<Callout kind="alert">
+  Tokens expire at **midnight IST** daily. If you see `401 Unauthorized` errors, run the login flow again at `http://localhost:8000/api/upstox/login`.
+</Callout>
 
 ```bash
-curl https://api.example.com/v1/example \
-  -H "Authorization: Bearer YOUR_TOKEN"
+# Using the token in direct API calls
+curl https://api.upstox.com/v2/user/profile \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Accept: application/json"
 ```
 
-<ParamField header="Authorization" param-type="string" required="true">
-  `Bearer YOUR_TOKEN`
-</ParamField>
+## REST API Endpoints Used
 
-## Keep OpenAPI in sync
+| Upstox Endpoint | TradeBotX Usage | Version |
+|---|---|---|
+| `GET /v2/market-quote/ltp` | Batch live prices for 48 stocks in one call | V2 |
+| `GET /v2/market-quote/quotes` | Full OHLCV + market depth for a single stock | V2 |
+| `GET /v3/historical-candle/{key}/{unit}/{interval}` | 100-day daily OHLCV for indicators | V3 |
+| `GET /v3/intraday-candle/{key}/{unit}/{interval}` | Today's 5-min candles for VWAP | V3 |
+| `GET /v2/user/profile` | Token validation on startup | V2 |
+| `GET /v2/instruments/search` | Symbol-to-ISIN lookup | V2 |
+| `wss://api.upstox.com/v3/feed` | Real-time WebSocket tick streaming | V3 WS |
 
-Define your authentication and base settings in `openapi.yaml` so the API Reference stays accurate and consistent.
+### Batch LTP — Most Common Operation
 
-At a minimum, you should:
+All 48 NIFTY 50 prices are fetched in a **single API call**, keeping rate-limit usage minimal:
 
-- Define one or more security schemes that describe how clients authenticate (for example, bearer token, API key in a header, or other scheme).
-- Reference those security schemes on operations that require authentication so they are clearly marked as secured.
-- Set the correct base URL and any required global headers (for example, versioning or tenant headers) so example requests are copy-pasteable.
+```bash
+GET http://localhost:8000/api/upstox/ltp/batch?index=NIFTY50
 
-When your real authentication flow changes (for example, new header names, token formats, or additional requirements), update `openapi.yaml`. The generated API Reference will then reflect your current auth model without needing to edit each endpoint page by hand.
+# Response
+{
+  "prices": {
+    "RELIANCE": 2945.50,
+    "TCS": 3812.00,
+    "HDFCBANK": 1680.25
+  },
+  "timestamp": "2025-01-15T10:30:00+05:30"
+}
+```
 
-## Using the API reference
+## WebSocket Feed
 
-Use the API Reference to explore endpoints, required parameters, and example responses. When you change authentication headers or base URLs, update `openapi.yaml` so the generated reference matches what your clients should use.
+`upstox_ws.py` maintains a persistent WebSocket connection to the Upstox V3 feed.
 
-## Common mistakes
+| Feature | Detail |
+|---|---|
+| **Feed modes** | `LTPC` (last price + change) or `Full` (OHLCV + depth + OI) |
+| **Auto-reconnect** | Reconnects with exponential backoff on disconnect |
+| **Subscriptions** | Up to 1,000 instrument keys per connection |
+| **Data format** | Protobuf, decoded to JSON by the client |
 
-<Expandable title="Why am I getting a 401?" default-open="false">
+<Callout kind="info">
+  The WebSocket feed activates only when the auto-scanner is running or when the Paper Trading view has live updates enabled. It is not connected on startup by default.
+</Callout>
 
-Verify that:
+## Instrument Key Format
 
-- The token is valid and not expired.
-- The token is sent in the `Authorization` header.
-- The header value includes the `Bearer` prefix and a space before the token.
+Upstox identifies each stock with an **instrument key**:
 
-</Expandable>
+```
+{EXCHANGE_SEGMENT}|{ISIN}
+```
+
+| Example | Stock |
+|---|---|
+| `NSE_EQ\|INE002A01018` | Reliance Industries |
+| `NSE_EQ\|INE009A01021` | Infosys |
+
+TradeBotX maintains hardcoded mappings in `upstox_client.py` for:
+- **NIFTY 50** — 48 instruments
+- **NIFTY BANK** — 12 instruments
+
+<Callout kind="alert">
+  ISINs can change after corporate actions (splits, bonus issues, demergers). If a stock returns `404`, update its mapping in `upstox_client.py` with the current ISIN from nseindia.com.
+</Callout>
+
+## Rate Limits
+
+| Limit Type | Value |
+|---|---|
+| Requests per second | 25 |
+| Historical candle requests per day | 1,000 |
+| Intraday candle requests per day | 1,000 |
+
+TradeBotX reduces rate-limit impact through batch LTP calls, on-demand signal computation, and a 60-second in-memory signal cache.
+
+## Sandbox vs. Live Mode
+
+```env
+UPSTOX_MODE=live      # Real market data — daily token required
+UPSTOX_MODE=sandbox   # Simulated data — suitable for development
+```

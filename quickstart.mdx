@@ -1,58 +1,162 @@
 ---
-title: Quickstart
-description: Minimal steps to customize this sample starter kit.
+title: Setup & Installation
+description: Install, configure, and run TradeBotX locally — prerequisites, environment variables, and the daily Upstox token refresh.
 ---
-## Overview
 
-<Callout kind="alert" collapsed="false">
-  This site ships with placeholder content. Use this quickstart to replace it with your real product docs.
+## Prerequisites
+
+| Requirement | Version | Notes |
+|---|---|---|
+| **Python** | 3.12+ | Earlier versions are untested |
+| **Node.js** | 18+ | Required for the React frontend |
+| **Upstox Developer Account** | — | Free account at developer.upstox.com |
+| **OpenAI API Key** | — | Required for the 13-agent AI pipeline |
+
+<Callout kind="tip">
+  You can use `UPSTOX_MODE=sandbox` in your `.env` for development and testing without a live Upstox trading account.
 </Callout>
 
-## 1. Update a page
+## Installation
 
 <Steps>
-  <Step title="Edit introduction" icon="edit" title-type="p">
-    Replace the sample introduction with a concise overview of your product and the key actions you want new users to take first.
+  <Step title="Clone the repository" icon="download" title-type="p">
+    ```bash
+    git clone https://github.com/your-org/tradebotx.git
+    cd tradebotx
+    ```
   </Step>
 
-  <Step title="Preview your change" icon="monitor" title-type="p">
-    Use your dashboard board editor to confirm the updated introduction looks and reads as expected.
+  <Step title="Create a Python virtual environment" icon="box" title-type="p">
+    ```bash
+    python -m venv venv
+
+    # Windows
+    .\venv\Scripts\activate
+
+    # macOS / Linux
+    source venv/bin/activate
+    ```
+  </Step>
+
+  <Step title="Install Python dependencies" icon="package" title-type="p">
+    ```bash
+    pip install -r requirements.txt
+    ```
+  </Step>
+
+  <Step title="Configure environment variables" icon="settings" title-type="p">
+    ```bash
+    cp .env.example .env
+    ```
+    Open `.env` and fill in your API keys. See the section below for every required variable.
+  </Step>
+
+  <Step title="Install frontend dependencies" icon="layers" title-type="p">
+    ```bash
+    cd frontend
+    npm install
+    cd ..
+    ```
   </Step>
 </Steps>
 
-## 2. Add a new page
+## Environment Variables
+
+```env
+# LLM Provider
+OPENAI_API_KEY=sk-proj-...
+
+# Upstox API
+UPSTOX_ACCESS_TOKEN=eyJ0eX...     # JWT — populated automatically after OAuth login
+UPSTOX_API_KEY=9e6b9529-...       # From your Upstox developer app
+UPSTOX_API_SECRET=zfzQ8g...       # From your Upstox developer app
+UPSTOX_REDIRECT_URI=http://localhost:8000/callback
+UPSTOX_MODE=live                  # "live" or "sandbox"
+```
+
+<Callout kind="alert">
+  Leave `UPSTOX_ACCESS_TOKEN` blank on first run. The OAuth flow below will populate it automatically after you log in.
+</Callout>
+
+### Getting Your Upstox Keys
 
 <Steps>
-  <Step title="Add a page" icon="file-text" title-type="p">
-    Create a new `page` by clicking on the + button from the left navigation bar of dashboard. If you are using git, create the .mdx file and add to navigation bar using documentation.json
+  <Step title="Create a developer app" icon="plus" title-type="p">
+    Go to developer.upstox.com, sign in, and create a new app.
+  </Step>
+  <Step title="Set the redirect URI" icon="link" title-type="p">
+    In your app settings, set the redirect URI to `http://localhost:8000/callback`.
+  </Step>
+  <Step title="Copy your credentials" icon="copy" title-type="p">
+    Copy the **API Key** and **API Secret** into your `.env` file.
   </Step>
 </Steps>
 
-## Example onboarding flow (replace with yours)
+## Running TradeBotX
 
-1. Sign up for an account and verify your email.
+Open two terminal windows and run each command in its own terminal:
 
-2. Create your first workspace, project, or environment.
+<Tabs>
+  <Tab title="Terminal 1 — Backend" icon="server">
+    ```bash
+    # Activate the virtual environment first
+    .\venv\Scripts\activate      # Windows
+    source venv/bin/activate     # macOS / Linux
 
-3. Add one integration or data source to connect your existing tools.
+    python api_server.py
+    ```
+    The backend starts at **http://localhost:8000**.
+  </Tab>
+  <Tab title="Terminal 2 — Frontend" icon="monitor">
+    ```bash
+    cd frontend
+    npm run dev
+    ```
+    The frontend starts at **http://localhost:5173**.
+  </Tab>
+</Tabs>
 
-4. Complete a guided action (for example, run your first job or publish your first resource).
+Then open **http://localhost:5173** in your browser.
 
-5. Invite a teammate and assign a basic role or permission.
+## Daily Token Refresh
 
-## 3. Connect API Reference (optional)
+Upstox tokens expire every day at **midnight IST** and must be refreshed once per day. The process takes under 30 seconds:
 
-If you have an API, replace `openapi.yaml` with your real OpenAPI file. If you do not need an API reference, remove that tab either from dashboard or  `documentation.json`.
+<Steps>
+  <Step title="Open the login URL" icon="external-link" title-type="p">
+    Navigate to **http://localhost:8000/api/upstox/login** in your browser.
+  </Step>
+  <Step title="Log in to Upstox" icon="lock" title-type="p">
+    You will be redirected to Upstox's login page. Enter your credentials and click **Authorize**.
+  </Step>
+  <Step title="Token saved automatically" icon="check-circle" title-type="p">
+    The callback handler saves the new token to `.env`. No server restart needed.
+  </Step>
+</Steps>
 
-## Next steps
+## Verify Everything Is Working
 
-<Columns cols="2">
-  <Card title="Core Concepts" href="/concepts" icon="layers" horizontal="false">
-    Keep the mental model simple and easy to scan.
-  </Card>
+```bash
+# Should return live prices for all NIFTY 50 stocks
+curl http://localhost:8000/api/upstox/ltp/batch?index=NIFTY50
+```
 
-  <Card title="Authentication" href="/authentication" icon="lock" horizontal="false">
-    Add your real auth flows and security notes.
-  </Card>
-</Columns>
+If you see `401 Unauthorized`, your Upstox token has expired — run the daily token refresh above.
 
+## Troubleshooting
+
+<Expandable title="ModuleNotFoundError on startup" default-open="false">
+  Your virtual environment is not activated. Run `.\venv\Scripts\activate` (Windows) or `source venv/bin/activate` (macOS/Linux) before running `python api_server.py`.
+</Expandable>
+
+<Expandable title="404 Not Found for a specific stock" default-open="false">
+  The instrument ISIN for that stock has changed due to a corporate action (split, bonus issue, demerger). Update the mapping in `upstox_client.py` with the current ISIN from nseindia.com.
+</Expandable>
+
+<Expandable title="Intraday signal scores stuck at 0.5" default-open="false">
+  The intraday candle endpoint returns `404` when the market is closed (weekends and public holidays). This is expected — the engine falls back to SMA-200 as a VWAP substitute outside market hours.
+</Expandable>
+
+<Expandable title="RateLimitError from OpenAI" default-open="false">
+  The 13-agent pipeline makes many LLM calls in sequence. Free-tier OpenAI accounts may hit rate limits. Add a delay in `default_config.py` or upgrade your OpenAI plan.
+</Expandable>
