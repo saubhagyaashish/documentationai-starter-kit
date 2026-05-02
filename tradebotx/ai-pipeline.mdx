@@ -1,0 +1,151 @@
+---
+title: AI Agent Pipeline
+description: How the 13-agent LangGraph pipeline works — roles, phases, data sources, and the final decision process.
+---
+
+## Overview
+
+The AI pipeline is the analytical core of TradeBotX. It is a **LangGraph-based multi-agent system** where 13 specialized AI agents — each with a distinct role — collaborate and debate to produce a single, well-reasoned trading decision.
+
+The pipeline runs in **five sequential phases**. Earlier phases feed context into later ones, so by the time the Portfolio Manager makes the final call, it has considered technical charts, news sentiment, fundamentals, macro conditions, bull vs. bear arguments, and three different risk perspectives.
+
+<Callout kind="info">
+  A full pipeline run takes approximately **2 minutes** per stock. Progress is streamed to the frontend in real time via Server-Sent Events (SSE).
+</Callout>
+
+## The Five Phases
+
+<Steps>
+  <Step title="Phase 1 — Analysis" icon="search" title-type="p">
+    Five specialist analysts independently gather and interpret data about the stock. Their reports become the shared evidence base for all subsequent agents.
+  </Step>
+
+  <Step title="Phase 2 — Research Debate" icon="message-square" title-type="p">
+    A Bull Researcher and a Bear Researcher each build the strongest possible case from the analyst reports. A Research Manager then mediates the debate and produces a balanced summary.
+  </Step>
+
+  <Step title="Phase 3 — Trading Proposal" icon="trending-up" title-type="p">
+    The Trader agent reads the research summary and proposes a specific entry/exit plan: direction, entry price, stop-loss, and target.
+  </Step>
+
+  <Step title="Phase 4 — Risk Debate" icon="shield" title-type="p">
+    Three risk analysts evaluate the trader's plan from different angles — aggressive (growth-focused), conservative (capital-preservation), and neutral (balanced).
+  </Step>
+
+  <Step title="Phase 5 — Final Decision" icon="flag" title-type="p">
+    The Portfolio Manager reads all three risk views and issues the final verdict: **BUY**, **SELL**, or **HOLD**, with a confidence rating.
+  </Step>
+</Steps>
+
+## Agent Roster
+
+### Phase 1 Analysts
+
+| Agent | Role | Data Sources |
+|---|---|---|
+| **Market Analyst** | Technical chart analysis — price patterns, momentum, trend | yFinance OHLCV data |
+| **Social Media Analyst** | Retail sentiment from social platforms | Social media APIs |
+| **News Analyst** | Recent news events and their market impact | News APIs |
+| **Fundamentals Analyst** | P/E ratio, revenue growth, earnings quality | Financial data APIs |
+| **India Macro Analyst** | GDP trends, RBI policy, FII/DII flows, sector rotation | Macro data sources |
+
+### Phase 2 Researchers
+
+| Agent | Role | Input |
+|---|---|---|
+| **Bull Researcher** | Constructs the strongest possible bullish case | All five analyst reports |
+| **Bear Researcher** | Constructs the strongest possible bearish case | All five analyst reports |
+| **Research Manager** | Mediates the debate and synthesizes a balanced view | Both researcher reports |
+
+### Phase 3 Trader
+
+| Agent | Role | Input |
+|---|---|---|
+| **Trader** | Proposes a specific trade plan (direction, entry, SL, target) | Research Manager's summary |
+
+### Phase 4 Risk Analysts
+
+| Agent | Risk Lens | Focus |
+|---|---|---|
+| **Aggressive Analyst** | Growth-oriented | Upside potential, momentum, opportunity cost |
+| **Conservative Analyst** | Capital-preservation | Downside risk, position sizing, worst-case scenarios |
+| **Neutral Analyst** | Balanced | Risk/reward ratio, portfolio fit, expected value |
+
+### Phase 5 Decision Maker
+
+| Agent | Role | Input |
+|---|---|---|
+| **Portfolio Manager** | Issues the final BUY / SELL / HOLD with confidence rating | All three risk analyst views |
+
+## Output Format
+
+The pipeline produces a structured result saved to the `predictions` table:
+
+```json
+{
+  "ticker": "RELIANCE",
+  "decision": "BUY",
+  "rating": 0.78,
+  "price_at_prediction": 2945.50,
+  "reports": {
+    "market_analyst": "...",
+    "bull_researcher": "...",
+    "bear_researcher": "...",
+    "trader": "Entry at 2945, SL at 2890, Target 3050",
+    "portfolio_manager": "..."
+  }
+}
+```
+
+## LLM Configuration
+
+The pipeline supports multiple LLM providers through an abstraction layer in `tradingagents/llm_clients/`:
+
+| Provider | Model | Notes |
+|---|---|---|
+| **OpenAI** | GPT-4, GPT-4o | Default; requires `OPENAI_API_KEY` |
+| **Anthropic** | Claude 3.5 Sonnet | Drop-in replacement |
+| **Google** | Gemini Pro | Drop-in replacement |
+| **Ollama** | Any local model | Requires running Ollama locally |
+| **OpenRouter** | Any hosted model | Flexible provider routing |
+
+The active provider and model are set in `tradingagents/default_config.py`.
+
+<Callout kind="tip">
+  All agents in a single pipeline run use the same LLM provider. Mixing providers across agents in one run is not supported in the current design.
+</Callout>
+
+## Triggering the Pipeline
+
+<Tabs>
+  <Tab title="Via the Dashboard">
+    1. Open the **Analysis** tab in the React dashboard.
+    2. Enter a stock ticker (e.g., `RELIANCE`) in the search box.
+    3. Click **Analyse** — the pipeline starts and progress appears live.
+  </Tab>
+
+  <Tab title="Via the API">
+    ```bash
+    # Stream results as SSE
+    curl -N "http://localhost:8000/api/analyze/stream?ticker=RELIANCE&date=2025-01-15"
+    ```
+  </Tab>
+
+  <Tab title="Via CLI (no UI)">
+    ```bash
+    # Run the pipeline standalone from the terminal
+    python main.py --ticker RELIANCE --date 2025-01-15
+    ```
+  </Tab>
+</Tabs>
+
+## Prediction Accuracy Tracking
+
+Every pipeline result is stored in SQLite. The **Predictions** tab in the dashboard shows:
+
+- Win rate (decision matched actual next-day direction)
+- Average return on BUY calls
+- Outcome distribution (BUY / SELL / HOLD breakdown)
+- Per-stock accuracy
+
+Outcomes are checked automatically when you run a new scan — the system looks up the actual price movement after the prediction date and marks each prediction as a win or loss.

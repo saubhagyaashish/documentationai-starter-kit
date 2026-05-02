@@ -1,0 +1,142 @@
+---
+title: Upstox Integration
+description: OAuth 2.0 authentication, API endpoints used, WebSocket feed, and instrument key mapping for the Upstox V2/V3 integration.
+---
+
+## Overview
+
+TradeBotX uses the **Upstox V2 and V3 APIs** as its exclusive source of live Indian market data. All market-data features — live prices, candles, intraday data, and real-time streaming — go through Upstox.
+
+The integration is implemented across three files:
+
+| File | Responsibility |
+|---|---|
+| `upstox_auth.py` | OAuth 2.0 token management |
+| `upstox_client.py` | REST API wrapper for market data |
+| `upstox_ws.py` | WebSocket feed for real-time ticks |
+
+## Authentication
+
+Upstox uses **OAuth 2.0 with a daily-expiring JWT**. Tokens expire at **midnight IST** every day and must be refreshed once per day.
+
+### Daily Token Refresh Flow
+
+<Steps>
+  <Step title="Open the login URL" icon="external-link" title-type="p">
+    Navigate to `http://localhost:8000/api/upstox/login` in your browser. TradeBotX generates the Upstox OAuth authorization URL and redirects you there.
+  </Step>
+
+  <Step title="Authenticate with Upstox" icon="lock" title-type="p">
+    Log in to your Upstox account and authorize the TradeBotX app. Upstox redirects you back to the configured callback URL.
+  </Step>
+
+  <Step title="Token saved automatically" icon="save" title-type="p">
+    The callback handler (`GET /callback`) exchanges the authorization code for a JWT access token and saves it to your `.env` file. No server restart is needed.
+  </Step>
+</Steps>
+
+<Callout kind="alert">
+  Tokens expire at **midnight IST** daily. If you see `401 Unauthorized` errors, your token has expired. Visit `http://localhost:8000/api/upstox/login` to refresh it.
+</Callout>
+
+### Token Validation
+
+On every API call, `upstox_auth.py` checks whether the current token is valid by calling `GET /v2/user/profile`. If the call fails, TradeBotX returns a clear error message prompting you to re-authenticate rather than silently failing.
+
+## REST API Endpoints Used
+
+| Upstox Endpoint | TradeBotX Usage | Version |
+|---|---|---|
+| `GET /v2/market-quote/ltp` | Batch live prices for up to 48 stocks in one call | V2 |
+| `GET /v2/market-quote/quotes` | Full OHLCV + market depth for a single stock | V2 |
+| `GET /v3/historical-candle/{key}/{unit}/{interval}` | 100-day daily OHLCV for technical indicators | V3 |
+| `GET /v3/intraday-candle/{key}/{unit}/{interval}` | Today's 5-minute candles for VWAP computation | V3 |
+| `GET /v2/user/profile` | Token validation on startup | V2 |
+| `GET /v2/instruments/search` | Symbol-to-ISIN lookup for dynamic mapping | V2 |
+| `wss://api.upstox.com/v3/feed` | Real-time WebSocket tick streaming | V3 WS |
+
+### Batch LTP (Most Common Operation)
+
+The most frequently called endpoint fetches live prices for all 48 NIFTY 50 stocks in a **single API call**, minimizing rate-limit consumption:
+
+```bash
+GET /api/upstox/ltp/batch?index=NIFTY50
+
+# Response
+{
+  "prices": {
+    "RELIANCE": 2945.50,
+    "TCS": 3812.00,
+    "HDFCBANK": 1680.25,
+    ...
+  },
+  "timestamp": "2025-01-15T10:30:00+05:30"
+}
+```
+
+## WebSocket Feed
+
+`upstox_ws.py` establishes a persistent WebSocket connection to the Upstox V3 feed for real-time tick data.
+
+| Feature | Detail |
+|---|---|
+| **Feed modes** | `LTPC` (last price + change) or `Full` (OHLCV + depth + OI) |
+| **Auto-reconnect** | Reconnects with exponential backoff on disconnect |
+| **Subscriptions** | Up to 1,000 instrument keys per connection |
+| **Data format** | Protobuf (decoded to JSON by the client) |
+
+<Callout kind="info">
+  The WebSocket feed is not connected by default. It is activated when the auto-scanner is running or when the Paper Trading view is open with live price updates enabled.
+</Callout>
+
+## Instrument Key Format
+
+Upstox identifies each stock with an **instrument key** in the format:
+
+```
+{EXCHANGE_SEGMENT}|{ISIN}
+```
+
+Examples:
+- `NSE_EQ|INE002A01018` → Reliance Industries
+- `NSE_EQ|INE009A01021` → Infosys
+
+### Supported Instruments
+
+TradeBotX maintains hardcoded instrument key mappings for:
+
+- **NIFTY 50** — 48 instruments (2 index tokens excluded)
+- **NIFTY BANK** — 12 instruments
+
+These mappings live in `upstox_client.py` as a Python dictionary.
+
+<Callout kind="alert">
+  ISINs can change due to corporate actions (stock splits, bonus issues, demergers). If a stock returns `404 Not Found`, its ISIN has likely changed and needs to be updated in `upstox_client.py`. Cross-reference the current ISIN at [nseindia.com](https://www.nseindia.com).
+</Callout>
+
+## Rate Limits
+
+Upstox enforces per-second and per-day rate limits on the free developer tier:
+
+| Limit Type | Value |
+|---|---|
+| Requests per second | 25 |
+| Historical candle requests per day | 1,000 |
+| Intraday candle requests per day | 1,000 |
+
+TradeBotX mitigates rate limit impact through:
+- **Batch LTP** — fetches all 48 stock prices in 1 call instead of 48
+- **Signal-on-demand** — candle data is only fetched when a user requests a specific stock's signal, not proactively for all stocks
+- **Local caching** — computed signals are cached in memory for 60 seconds to prevent redundant calls during rapid UI interactions
+
+## Sandbox vs. Live Mode
+
+Set `UPSTOX_MODE=sandbox` in your `.env` to use the Upstox sandbox environment. In sandbox mode:
+- Market data is delayed or simulated
+- No real account positions are affected
+- Useful for development and testing without needing a live token
+
+```env
+UPSTOX_MODE=live      # Real market data, daily token required
+UPSTOX_MODE=sandbox   # Sandbox data, suitable for development
+```

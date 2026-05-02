@@ -1,0 +1,143 @@
+---
+title: Technical Indicator Engine
+description: How TradeBotX computes RSI, MACD, VWAP, Bollinger Bands, and other indicators — and combines them into a single composite signal score.
+---
+
+## Overview
+
+The `technical.py` module computes all technical indicators **locally** using pandas and numpy. No external TA library (TA-Lib, pandas-ta, etc.) is required. The module takes raw OHLCV candle data from Upstox and returns a composite signal score between **0.0** and **1.0**.
+
+## Dual-Timeframe Analysis
+
+The engine uses two timeframes simultaneously to capture both trend and intraday momentum:
+
+| Timeframe | Data Source | Indicators Computed |
+|---|---|---|
+| **Daily** (100 days) | Upstox historical candles | RSI, MACD, EMA-20/50, Bollinger Bands, ATR |
+| **Intraday 5-min** (today) | Upstox intraday candles | VWAP, Intraday Momentum |
+
+<Callout kind="info">
+  When intraday data is unavailable (market closed, weekends, or public holidays), the engine substitutes **SMA-200** as a proxy for VWAP, ensuring the score remains meaningful outside market hours.
+</Callout>
+
+## Indicators and Weights
+
+| Indicator | Weight | What It Measures |
+|---|---|---|
+| **MACD** (12 / 26 / 9) | 20% | Trend direction and crossover signals |
+| **EMA-20 & EMA-50** | 15% | Short and medium-term trend confirmation |
+| **VWAP** (5-min intraday) | 15% | Fair price relative to volume-weighted average |
+| **Volume Surge** (2× 20-day avg) | 15% | Institutional/unusual buying or selling activity |
+| **RSI** (14-period) | 9% | Overbought / oversold momentum |
+| **Bollinger Bands** (20 / 2σ) | 10% | Volatility and mean-reversion positioning |
+| **Intraday Momentum** | 10% | Real-time candle direction (last 5-min candles) |
+| **Stochastic %K** | 6% | Price position within its recent high-low range |
+
+Total weight sums to **100%**.
+
+## How Each Indicator Is Scored
+
+Each indicator produces a sub-score between 0.0 and 1.0 before being weighted:
+
+<Tabs>
+  <Tab title="RSI">
+    | RSI Value | Sub-score | Interpretation |
+    |---|---|---|
+    | < 30 | 0.9 | Strongly oversold → bullish |
+    | 30 – 40 | 0.7 | Mildly oversold |
+    | 40 – 60 | 0.5 | Neutral |
+    | 60 – 70 | 0.3 | Mildly overbought |
+    | > 70 | 0.1 | Strongly overbought → bearish |
+  </Tab>
+
+  <Tab title="MACD">
+    Scored on two signals combined:
+    1. **Histogram sign** — positive histogram → bullish (0.7), negative → bearish (0.3)
+    2. **Crossover recency** — a recent bullish crossover (MACD line crossing above signal) within the last 3 bars adds +0.2 to the sub-score; a bearish crossover subtracts 0.2.
+  </Tab>
+
+  <Tab title="VWAP">
+    | Price vs. VWAP | Sub-score |
+    |---|---|
+    | Price > VWAP by > 0.5% | 0.8 — strong bullish positioning |
+    | Price ≈ VWAP (±0.5%) | 0.5 — neutral |
+    | Price < VWAP by > 0.5% | 0.2 — bearish positioning |
+  </Tab>
+
+  <Tab title="Bollinger Bands">
+    | Price Position | Sub-score |
+    |---|---|
+    | Near lower band (< 20th percentile of band width) | 0.8 — mean-reversion buy signal |
+    | Middle zone | 0.5 — neutral |
+    | Near upper band (> 80th percentile) | 0.2 — mean-reversion sell signal |
+  </Tab>
+
+  <Tab title="Volume Surge">
+    | Volume vs. 20-day Average | Sub-score |
+    |---|---|
+    | > 2× average (surge) with up day | 0.9 — institutional buying |
+    | > 2× average (surge) with down day | 0.1 — institutional selling |
+    | 1–2× average | 0.5 — normal |
+    | < 1× average | 0.4 — low participation |
+  </Tab>
+</Tabs>
+
+## Composite Signal Score
+
+The final score is a weighted sum:
+
+```
+Score = (RSI × 0.09) + (Stochastic × 0.06) + (MACD × 0.20) +
+        (EMA × 0.15) + (VWAP × 0.15) + (Bollinger × 0.10) +
+        (VolumeSurge × 0.15) + (IntradayMomentum × 0.10)
+```
+
+## Signal Interpretation
+
+| Score Range | Signal | Recommended Action |
+|---|---|---|
+| ≥ 0.65 | **BUY** | Strong bullish confluence across most indicators |
+| 0.35 – 0.64 | **HOLD** | Mixed or conflicting signals — no edge |
+| ≤ 0.35 | **SELL** | Strong bearish confluence across most indicators |
+
+<Callout kind="tip">
+  The auto-scanner uses these same thresholds to trigger paper trades automatically: scores ≥ 0.65 on an upward-moving stock trigger a BUY; scores ≤ 0.35 on a held position trigger an exit.
+</Callout>
+
+## Additional Metrics
+
+Besides the composite score, the engine also computes and returns:
+
+| Metric | Description |
+|---|---|
+| **ATR** (14-period) | Average True Range — used to set stop-loss distances |
+| **EMA-200** | Long-term trend filter (used as VWAP fallback) |
+| **Support / Resistance** | Simple swing-high / swing-low detection over 20-day window |
+| **Trend Direction** | `"uptrend"`, `"downtrend"`, or `"sideways"` based on EMA alignment |
+
+## Accessing Signals via API
+
+```bash
+# Get full signal data for a single stock
+GET /api/upstox/signals/RELIANCE
+
+# Response
+{
+  "symbol": "RELIANCE",
+  "score": 0.71,
+  "signal": "BUY",
+  "indicators": {
+    "rsi": 42.3,
+    "macd_histogram": 8.5,
+    "vwap": 2930.0,
+    "price": 2945.5,
+    "ema20": 2910.0,
+    "ema50": 2870.0,
+    "bb_upper": 3010.0,
+    "bb_lower": 2820.0,
+    "volume_surge": true,
+    "atr": 45.2
+  },
+  "trend": "uptrend"
+}
+```

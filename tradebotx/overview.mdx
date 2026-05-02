@@ -1,0 +1,82 @@
+---
+title: TradeBotX Overview
+description: AI-powered Indian stock trading platform combining a 13-agent LLM pipeline with live Upstox market data and automated paper trading.
+---
+
+## What Is TradeBotX?
+
+TradeBotX is a full-stack trading intelligence platform built for the **Indian stock market (NSE)**. It combines a 13-agent AI pipeline powered by LLMs (GPT-4 / Claude) with real-time market data from Upstox, automated technical analysis, and a simulated paper trading engine — all accessible through a modern React dashboard.
+
+Think of it as your personal AI trading desk: it screens stocks, debates bull vs. bear cases using multiple AI agents, computes technical signals, and can auto-trade in paper mode — without risking real money.
+
+<Callout kind="info">
+  TradeBotX is designed for **paper trading only**. No real orders are placed on any exchange. It is a research and strategy-testing tool.
+</Callout>
+
+## Why TradeBotX?
+
+<Columns cols="2">
+  <Card title="Manual research takes hours" icon="clock" horizontal="false">
+    13 AI agents analyse a stock in ~2 minutes, covering macro, fundamentals, sentiment, and technicals.
+  </Card>
+
+  <Card title="Emotional trading decisions" icon="alert-triangle" horizontal="false">
+    Data-driven composite signal scores (0.0–1.0) replace gut-feel with reproducible analysis.
+  </Card>
+
+  <Card title="Missing market moves" icon="trending-up" horizontal="false">
+    Auto-scanner monitors NIFTY 50 every 5 minutes so no mover goes unnoticed.
+  </Card>
+
+  <Card title="No way to test strategies" icon="beaker" horizontal="false">
+    Paper trading with full risk management lets you validate ideas before committing capital.
+  </Card>
+
+  <Card title="Expensive trading terminals" icon="dollar-sign" horizontal="false">
+    Free, self-hosted, open-source — runs on your own machine with your own API keys.
+  </Card>
+
+  <Card title="Information overload" icon="filter" horizontal="false">
+    Curated analysis across four dimensions: macro, fundamentals, sentiment, and technicals.
+  </Card>
+</Columns>
+
+## Key Capabilities
+
+| Capability | Description |
+|---|---|
+| **13-Agent AI Pipeline** | LangGraph multi-agent system producing BUY / SELL / HOLD decisions |
+| **Live Market Data** | Real-time LTP, OHLCV candles, and WebSocket tick feed via Upstox V2/V3 API |
+| **Technical Indicator Engine** | RSI, MACD, VWAP, Bollinger Bands, EMA, Volume Surge — computed locally |
+| **Paper Trading Engine** | Simulated trades with stop-loss, take-profit, trailing stops, and time-based exits |
+| **Auto-Scanner** | Scheduled bot that screens NIFTY 50 every 5 minutes and auto-enters/exits positions |
+| **Prediction Tracker** | SQLite-backed accuracy tracking for all AI decisions |
+| **React Dashboard** | 6-tab UI: Screener, Analysis, Paper Trading, Watchlist, Predictions, Results |
+
+## Quick Navigation
+
+<Columns cols="3">
+  <Card title="System Architecture" href="/tradebotx/architecture" icon="git-branch" horizontal="false">
+    How all components connect — backend, frontend, Upstox, and the AI pipeline.
+  </Card>
+
+  <Card title="AI Agent Pipeline" href="/tradebotx/ai-pipeline" icon="cpu" horizontal="false">
+    Deep dive into the 13 agents, their roles, and how they collaborate.
+  </Card>
+
+  <Card title="Setup & Installation" href="/tradebotx/setup" icon="settings" horizontal="false">
+    Get TradeBotX running locally in under 10 minutes.
+  </Card>
+
+  <Card title="Technical Indicators" href="/tradebotx/technical-indicators" icon="bar-chart-2" horizontal="false">
+    The indicator engine: weights, formulas, and composite scoring.
+  </Card>
+
+  <Card title="Upstox Integration" href="/tradebotx/upstox-integration" icon="link" horizontal="false">
+    OAuth flow, API endpoints used, and instrument key mapping.
+  </Card>
+
+  <Card title="Paper Trading" href="/tradebotx/paper-trading" icon="dollar-sign" horizontal="false">
+    Risk rules, order lifecycle, and state persistence.
+  </Card>
+</Columns>

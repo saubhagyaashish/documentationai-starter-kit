@@ -148,6 +148,91 @@
             "icon": "history"
           }
         ]
+      },
+      {
+        "tab": "TradeBotX",
+        "icon": "trending-up",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "icon": "rocket",
+            "pages": [
+              {
+                "title": "Overview",
+                "path": "tradebotx/overview",
+                "icon": "home"
+              },
+              {
+                "title": "Setup & Installation",
+                "path": "tradebotx/setup",
+                "icon": "settings"
+              }
+            ]
+          },
+          {
+            "group": "Core Systems",
+            "icon": "layers",
+            "pages": [
+              {
+                "title": "System Architecture",
+                "path": "tradebotx/architecture",
+                "icon": "git-branch"
+              },
+              {
+                "title": "AI Agent Pipeline",
+                "path": "tradebotx/ai-pipeline",
+                "icon": "cpu"
+              },
+              {
+                "title": "Technical Indicators",
+                "path": "tradebotx/technical-indicators",
+                "icon": "bar-chart-2"
+              },
+              {
+                "title": "Auto-Scanner",
+                "path": "tradebotx/auto-scanner",
+                "icon": "scan"
+              }
+            ]
+          },
+          {
+            "group": "Integrations",
+            "icon": "plug",
+            "pages": [
+              {
+                "title": "Upstox Integration",
+                "path": "tradebotx/upstox-integration",
+                "icon": "link"
+              },
+              {
+                "title": "Paper Trading",
+                "path": "tradebotx/paper-trading",
+                "icon": "dollar-sign"
+              }
+            ]
+          },
+          {
+            "group": "Reference",
+            "icon": "book-open",
+            "pages": [
+              {
+                "title": "API Endpoints",
+                "path": "tradebotx/api-reference",
+                "icon": "code"
+              },
+              {
+                "title": "Database Schema",
+                "path": "tradebotx/database",
+                "icon": "database"
+              },
+              {
+                "title": "Roadmap & Limitations",
+                "path": "tradebotx/roadmap",
+                "icon": "map"
+              }
+            ]
+          }
+        ]
       }
     ]
   }

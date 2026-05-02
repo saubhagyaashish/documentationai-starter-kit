@@ -1,0 +1,144 @@
+---
+title: System Architecture
+description: How TradeBotX's frontend, backend, Upstox integration, and AI pipeline connect together.
+---
+
+## High-Level Overview
+
+TradeBotX is split into four layers that communicate through well-defined interfaces:
+
+| Layer | Technology | Responsibility |
+|---|---|---|
+| **Frontend** | React + Vite + TypeScript | Dashboard UI, SSE consumption, user interactions |
+| **Backend** | FastAPI + Python | REST API gateway, business logic, scheduling |
+| **Market Data** | Upstox V2/V3 API | Live prices, candles, WebSocket feed |
+| **AI Pipeline** | LangGraph + LLMs | 13-agent analysis and decision engine |
+
+## Backend Modules
+
+Each Python file in the backend has a single, focused responsibility:
+
+<Columns cols="2">
+  <Card title="api_server.py" icon="server" horizontal="false">
+    **FastAPI gateway** — all REST endpoints, SSE streaming, CORS configuration, and application lifespan management. ~1170 lines.
+  </Card>
+
+  <Card title="upstox_client.py" icon="link" horizontal="false">
+    **Upstox REST wrapper** — LTP, candles, full quotes, orders, option chains, and batch operations. ~703 lines.
+  </Card>
+
+  <Card title="upstox_auth.py" icon="lock" horizontal="false">
+    **OAuth 2.0 manager** — token validation, login URL generation, authorization-code-to-token exchange, `.env` persistence. ~222 lines.
+  </Card>
+
+  <Card title="upstox_ws.py" icon="radio" horizontal="false">
+    **WebSocket feed** — real-time price streaming with auto-reconnect, LTPC and Full modes. ~347 lines.
+  </Card>
+
+  <Card title="paper_trader.py" icon="dollar-sign" horizontal="false">
+    **Paper trading engine** — simulated trades, P&L tracking, risk rules, SQLite state persistence. ~722 lines.
+  </Card>
+
+  <Card title="signal_scanner.py" icon="scan" horizontal="false">
+    **Auto-trading bot** — batch LTP → filter movers → compute signals → auto-enter/exit positions. ~515 lines.
+  </Card>
+
+  <Card title="technical.py" icon="bar-chart-2" horizontal="false">
+    **Indicator engine** — RSI, MACD, VWAP, Bollinger Bands, ATR, and composite signal scoring. ~468 lines.
+  </Card>
+
+  <Card title="scheduler.py" icon="clock" horizontal="false">
+    **Morning scanner** — scheduled pre-market screening via APScheduler. ~342 lines.
+  </Card>
+
+  <Card title="database.py" icon="database" horizontal="false">
+    **Prediction tracker** — SQLite CRUD operations, win/loss outcome tracking, accuracy statistics. ~253 lines.
+  </Card>
+
+  <Card title="nse_holidays.py" icon="calendar" horizontal="false">
+    **Market calendar** — NSE holidays 2025–2026, market hours, `is_market_open()` utility. ~121 lines.
+  </Card>
+</Columns>
+
+## Frontend Components
+
+The React frontend is a single-page app with six top-level views, each corresponding to a tab in the navigation bar:
+
+| Component | View | Purpose |
+|---|---|---|
+| `ScreenerView.tsx` | Screener | NSE index stock screener with flag indicators |
+| `AnalysisView.tsx` | Analysis | Live agent pipeline progress and final results |
+| `PaperTradingView.tsx` | Paper Trading | Live prices, signal table, portfolio, trade history |
+| `WatchlistPanel.tsx` | Watchlist | Custom ticker list and batch analysis launcher |
+| `PredictionsView.tsx` | Predictions | AI decision accuracy tracking dashboard |
+| `ResultsView.tsx` | Results | Historical analysis results browser |
+
+Supporting files:
+
+- `App.tsx` — Root component, view routing, SSE connection management
+- `TopNav.tsx` — Navigation bar with 6 tabs
+- `SchedulerCard.tsx` — Morning scheduler configuration UI
+- `types.ts` — Shared TypeScript interfaces
+- `index.css` — Full design system (dark theme, glassmorphism) — ~65 KB
+
+## AI Agent Framework (`tradingagents/`)
+
+```
+tradingagents/
+├── agents/          Individual agent implementations
+├── graph/           LangGraph workflow — connects all 13 agents
+├── dataflows/       Data vendor routing (yFinance, Alpha Vantage, NSE API)
+├── llm_clients/     LLM abstraction layer (OpenAI, Anthropic, Ollama, OpenRouter)
+└── default_config.py  Default pipeline settings (model names, debate rounds, vendors)
+```
+
+## Request Flow: Loading a Signal
+
+This is the most common operation — fetching a composite signal score for a stock:
+
+<Steps>
+  <Step title="User clicks 'Load Signals'" icon="mouse-pointer" title-type="p">
+    The frontend sends `GET /api/upstox/signals/{symbol}` to the FastAPI backend.
+  </Step>
+
+  <Step title="Backend fetches candles" icon="download" title-type="p">
+    Two Upstox API calls are made: 100-day daily candles and today's 5-minute intraday candles.
+  </Step>
+
+  <Step title="Technical engine runs" icon="cpu" title-type="p">
+    `technical.py` computes RSI, MACD, EMA, VWAP, Bollinger Bands, Volume Surge, and Intraday Momentum from the raw candle data.
+  </Step>
+
+  <Step title="Composite score returned" icon="check-circle" title-type="p">
+    A weighted score (0.0–1.0) is returned to the frontend along with all individual indicator values.
+  </Step>
+</Steps>
+
+## Request Flow: Running an AI Analysis
+
+<Steps>
+  <Step title="User clicks 'Analyse'" icon="play" title-type="p">
+    The frontend opens a Server-Sent Events (SSE) connection to `GET /api/analyze/stream`.
+  </Step>
+
+  <Step title="13-agent pipeline starts" icon="cpu" title-type="p">
+    The LangGraph pipeline is invoked. Each agent sends progress updates as SSE events back to the frontend in real time.
+  </Step>
+
+  <Step title="Agents complete their phases" icon="layers" title-type="p">
+    Five analyst agents run first, then bull/bear researchers debate, then a trader proposes a plan, then three risk analysts evaluate it.
+  </Step>
+
+  <Step title="Portfolio Manager delivers verdict" icon="flag" title-type="p">
+    The final BUY / SELL / HOLD decision with a confidence rating is returned, saved to SQLite, and displayed in the UI.
+  </Step>
+</Steps>
+
+## External Dependencies
+
+| Service | Used For | Auth Method |
+|---|---|---|
+| **Upstox V2/V3 API** | Live prices, candles, orders | OAuth 2.0 JWT (daily refresh) |
+| **OpenAI GPT-4** | 13-agent LLM reasoning | API Key |
+| **Yahoo Finance** | Historical OHLCV fallback | None (public) |
+| **NSE India API** | Pre-market stock screening | None (public) |

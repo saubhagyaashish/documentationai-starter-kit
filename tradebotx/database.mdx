@@ -1,0 +1,159 @@
+---
+title: Database Schema
+description: SQLite tables used by TradeBotX — predictions, paper trades, and daily portfolio snapshots.
+---
+
+## Overview
+
+TradeBotX uses **SQLite** for all persistent storage. The database file is created automatically at `tradebotx.db` in the project root on first run. There are three tables: one for AI predictions, one for paper trades, and one for daily portfolio snapshots.
+
+The database module (`database.py`) provides all CRUD operations. No ORM is used — queries are written in plain SQL via Python's built-in `sqlite3` module.
+
+---
+
+## Table: `predictions`
+
+Stores every AI pipeline analysis result.
+
+```sql
+CREATE TABLE predictions (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticker              TEXT NOT NULL,
+    trade_date          TEXT NOT NULL,          -- YYYY-MM-DD
+    decision            TEXT NOT NULL,          -- BUY | SELL | HOLD
+    rating              REAL,                   -- 0.0 to 1.0 confidence
+    price_at_prediction REAL,                   -- Stock price when analysis ran
+    current_price       REAL,                   -- Price when outcome was checked
+    return_pct          REAL,                   -- Actual % return after prediction
+    is_win              INTEGER,                -- 1 = correct, 0 = wrong, NULL = unchecked
+    outcome_checked_at  TEXT,                   -- ISO timestamp of outcome check
+    reports_json        TEXT,                   -- Full agent reports as JSON string
+    created_at          TEXT DEFAULT (datetime('now'))
+);
+```
+
+| Column | Description |
+|---|---|
+| `ticker` | NSE stock symbol (e.g., `RELIANCE`) |
+| `trade_date` | The date the analysis was run |
+| `decision` | `BUY`, `SELL`, or `HOLD` |
+| `rating` | Portfolio Manager's confidence score (0.0–1.0) |
+| `price_at_prediction` | Stock price at the time of the analysis |
+| `current_price` | Price when `is_win` was determined |
+| `return_pct` | `(current_price - price_at_prediction) / price_at_prediction × 100` |
+| `is_win` | `1` if the decision proved correct, `0` if wrong, `NULL` if not yet checked |
+| `reports_json` | Full JSON of all 13 agent reports (for audit and review) |
+
+---
+
+## Table: `paper_trades`
+
+One row per paper trade — both open and closed positions.
+
+```sql
+CREATE TABLE paper_trades (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol          TEXT NOT NULL,
+    instrument_key  TEXT NOT NULL,              -- e.g., NSE_EQ|INE002A01018
+    side            TEXT NOT NULL,              -- BUY | SELL
+    quantity        INTEGER NOT NULL,
+    entry_price     REAL NOT NULL,
+    exit_price      REAL,                       -- NULL while position is open
+    entry_time      TEXT NOT NULL,              -- ISO timestamp
+    exit_time       TEXT,                       -- NULL while position is open
+    stop_loss       REAL,
+    target_price    REAL,
+    pnl             REAL,                       -- NULL while open
+    pnl_pct         REAL,                       -- NULL while open
+    is_win          INTEGER,                    -- 1 | 0 | NULL
+    exit_reason     TEXT,                       -- STOP_LOSS | TARGET | TRAILING_STOP |
+                                                --   TIME_EXIT | SIGNAL_WEAK | MANUAL
+    strategy        TEXT,                       -- "auto_scanner" | "manual"
+    signal_context  TEXT,                       -- JSON: indicator values at entry
+    created_at      TEXT DEFAULT (datetime('now'))
+);
+```
+
+| Column | Description |
+|---|---|
+| `exit_price` / `exit_time` | `NULL` while the position is still open |
+| `exit_reason` | Why the position was closed — useful for strategy analysis |
+| `signal_context` | Snapshot of all indicator values at the time of entry (stored as JSON) |
+| `strategy` | `"auto_scanner"` for bot-entered trades, `"manual"` for user-initiated trades |
+
+---
+
+## Table: `paper_portfolio`
+
+One row per trading day — daily portfolio snapshots for P&L charting.
+
+```sql
+CREATE TABLE paper_portfolio (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    date            TEXT NOT NULL UNIQUE,       -- YYYY-MM-DD
+    capital         REAL NOT NULL,              -- Total capital (deployed + available)
+    daily_pnl       REAL DEFAULT 0,
+    total_pnl       REAL DEFAULT 0,
+    open_positions  INTEGER DEFAULT 0,
+    daily_trades    INTEGER DEFAULT 0,
+    daily_wins      INTEGER DEFAULT 0,
+    daily_losses    INTEGER DEFAULT 0,
+    win_rate        REAL DEFAULT 0,             -- daily_wins / daily_trades
+    created_at      TEXT DEFAULT (datetime('now'))
+);
+```
+
+This table is updated at the end of each trading day and also whenever a position is closed. The dashboard uses it to render the cumulative P&L chart.
+
+---
+
+## Useful Queries
+
+```sql
+-- Overall prediction win rate
+SELECT
+  COUNT(*) AS total,
+  SUM(is_win) AS wins,
+  ROUND(100.0 * SUM(is_win) / COUNT(*), 1) AS win_rate_pct
+FROM predictions
+WHERE is_win IS NOT NULL;
+
+-- Best performing stocks by win rate
+SELECT ticker,
+  COUNT(*) AS calls,
+  SUM(is_win) AS wins,
+  ROUND(100.0 * SUM(is_win) / COUNT(*), 1) AS win_pct
+FROM predictions
+WHERE is_win IS NOT NULL
+GROUP BY ticker
+ORDER BY win_pct DESC;
+
+-- Open paper positions
+SELECT symbol, entry_price, stop_loss, target_price, entry_time
+FROM paper_trades
+WHERE exit_time IS NULL;
+
+-- Top exit reasons
+SELECT exit_reason, COUNT(*) AS count
+FROM paper_trades
+WHERE exit_time IS NOT NULL
+GROUP BY exit_reason
+ORDER BY count DESC;
+```
+
+---
+
+## Backup & Reset
+
+```bash
+# Backup the database before making changes
+cp tradebotx.db tradebotx.db.bak
+
+# Reset paper trading (wipes all paper trades and portfolio snapshots)
+# — predictions are preserved
+sqlite3 tradebotx.db "DELETE FROM paper_trades; DELETE FROM paper_portfolio;"
+```
+
+<Callout kind="alert">
+  Resetting paper trades also resets the circuit breaker and daily loss counters, since those are reconstructed from the trade table on startup.
+</Callout>

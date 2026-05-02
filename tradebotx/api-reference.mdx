@@ -1,0 +1,300 @@
+---
+title: API Endpoints
+description: Complete reference for all TradeBotX REST API endpoints — market data, AI analysis, paper trading, auto-scanner, watchlist, and authentication.
+---
+
+## Base URL
+
+All endpoints are served from the FastAPI backend:
+
+```
+http://localhost:8000
+```
+
+The API is documented interactively at **http://localhost:8000/docs** (Swagger UI) and **http://localhost:8000/redoc** (ReDoc).
+
+---
+
+## Market Data
+
+### Batch Live Prices
+
+```
+GET /api/upstox/ltp/batch
+```
+
+Fetches live last-traded prices for all stocks in a NSE index in a **single Upstox API call**.
+
+| Query Parameter | Type | Required | Description |
+|---|---|---|---|
+| `index` | string | Yes | `NIFTY50` or `NIFTYBANK` |
+
+**Example response:**
+```json
+{
+  "prices": { "RELIANCE": 2945.50, "TCS": 3812.00 },
+  "timestamp": "2025-01-15T10:30:00+05:30"
+}
+```
+
+---
+
+### Individual LTP
+
+```
+GET /api/upstox/ltp/{symbol}
+```
+
+| Path Parameter | Description |
+|---|---|
+| `symbol` | NSE ticker (e.g., `RELIANCE`, `TCS`) |
+
+---
+
+### Full Market Quote
+
+```
+GET /api/upstox/quote/{symbol}
+```
+
+Returns OHLCV data, market depth (bid/ask), circuit limits, and 52-week high/low.
+
+---
+
+### Historical Candles
+
+```
+GET /api/upstox/candles/{symbol}
+```
+
+| Query Parameter | Default | Description |
+|---|---|---|
+| `days` | 100 | Number of trading days of daily candles |
+
+---
+
+### Composite Signal Score
+
+```
+GET /api/upstox/signals/{symbol}
+```
+
+Computes and returns the full technical indicator analysis and composite signal score.
+
+**Example response:**
+```json
+{
+  "symbol": "RELIANCE",
+  "score": 0.71,
+  "signal": "BUY",
+  "indicators": {
+    "rsi": 42.3,
+    "macd_histogram": 8.5,
+    "vwap": 2930.0,
+    "price": 2945.5,
+    "ema20": 2910.0,
+    "ema50": 2870.0,
+    "volume_surge": true,
+    "atr": 45.2
+  },
+  "trend": "uptrend"
+}
+```
+
+---
+
+### Top Movers
+
+```
+GET /api/upstox/movers
+```
+
+| Query Parameter | Default | Description |
+|---|---|---|
+| `index` | `NIFTY50` | Index to screen |
+| `min_move_pct` | `0.5` | Minimum % change to include |
+| `limit` | `15` | Maximum number of movers to return |
+
+---
+
+### Supported Instruments
+
+```
+GET /api/upstox/instruments
+```
+
+Returns all configured instrument key mappings (symbol → ISIN).
+
+---
+
+## AI Analysis
+
+### Stream Analysis (SSE)
+
+```
+GET /api/analyze/stream
+```
+
+Opens a Server-Sent Events stream. The 13-agent pipeline runs and emits progress events in real time.
+
+| Query Parameter | Required | Description |
+|---|---|---|
+| `ticker` | Yes | NSE stock symbol |
+| `date` | No | Analysis date (defaults to today, format: `YYYY-MM-DD`) |
+
+**SSE event format:**
+```
+event: progress
+data: {"agent": "market_analyst", "status": "complete", "pct": 15}
+
+event: result
+data: {"decision": "BUY", "rating": 0.78, "reports": {...}}
+```
+
+---
+
+### Batch Analysis
+
+```
+POST /api/analyze/batch
+```
+
+Runs the pipeline on multiple tickers sequentially (not streamed — waits for all to complete).
+
+```json
+{
+  "tickers": ["RELIANCE", "TCS", "HDFCBANK"],
+  "date": "2025-01-15"
+}
+```
+
+---
+
+### NSE Index Screener
+
+```
+GET /api/screen
+```
+
+Screens an NSE index and returns flagged stocks (strong signals, high volume, news events).
+
+| Query Parameter | Default | Description |
+|---|---|---|
+| `index` | `NIFTY50` | Index to screen |
+
+---
+
+### Available Indices
+
+```
+GET /api/indices
+```
+
+Returns all NSE indices supported by TradeBotX.
+
+---
+
+### Historical Results
+
+```
+GET /api/results
+```
+
+Returns all past AI analysis results stored in the `predictions` table.
+
+---
+
+## Paper Trading
+
+### Portfolio State
+
+```
+GET /api/paper/portfolio
+```
+
+Returns current open positions, available capital, and daily/total P&L statistics.
+
+---
+
+### Enter a Trade
+
+```
+POST /api/paper/buy
+```
+
+```json
+{
+  "symbol": "RELIANCE",
+  "instrument_key": "NSE_EQ|INE002A01018",
+  "stop_loss": 2890.00,
+  "target_price": 3050.00,
+  "signal_score": 0.73
+}
+```
+
+---
+
+### Exit a Trade
+
+```
+POST /api/paper/sell
+```
+
+```json
+{
+  "symbol": "RELIANCE",
+  "exit_reason": "MANUAL"
+}
+```
+
+---
+
+### Trade History
+
+```
+GET /api/paper/history
+```
+
+Returns all closed trades with entry/exit prices, P&L, and exit reason.
+
+---
+
+### Performance Statistics
+
+```
+GET /api/paper/performance
+```
+
+Returns win rate, total P&L, average trade P&L, and per-stock breakdown.
+
+---
+
+## Auto-Scanner
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/scanner/status` | Scanner state, last scan time, last signals |
+| `POST` | `/api/scanner/start` | Start the auto-trading bot |
+| `POST` | `/api/scanner/stop` | Stop the auto-trading bot |
+| `POST` | `/api/scanner/scan-now` | Trigger an immediate scan cycle |
+| `POST` | `/api/scanner/config` | Update scanner settings |
+
+---
+
+## Watchlist
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/watchlist/custom` | Get the custom ticker list |
+| `POST` | `/api/watchlist/custom` | Add a ticker to the watchlist |
+| `DELETE` | `/api/watchlist/custom/{ticker}` | Remove a ticker from the watchlist |
+
+---
+
+## Authentication (Upstox OAuth)
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/upstox/login` | Generate OAuth login URL and redirect |
+| `GET` | `/callback` | OAuth redirect handler — exchanges code for token and saves to `.env` |
+| `GET` | `/api/upstox/token-status` | Check whether the current token is valid |

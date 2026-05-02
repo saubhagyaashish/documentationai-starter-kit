@@ -1,0 +1,102 @@
+---
+title: Roadmap & Known Limitations
+description: Current limitations, short-term improvements, and the long-term vision for TradeBotX.
+---
+
+## Known Limitations
+
+These are the current constraints you should be aware of before deploying TradeBotX:
+
+| Limitation | Impact | Workaround |
+|---|---|---|
+| **Daily token expiry** | Upstox tokens expire at midnight IST every day | Run the OAuth flow once each morning at `/api/upstox/login` |
+| **Intraday 404s** | The V3 intraday candle endpoint returns `404` when the market is closed (weekends, holidays) | Expected behaviour — the engine falls back to SMA-200 as a VWAP substitute |
+| **Hardcoded ISINs** | Instrument key mappings may go stale after corporate actions (splits, bonus issues) | Manually update the mapping in `upstox_client.py` using the current ISIN from nseindia.com |
+| **Single-user** | No authentication layer — the server is fully open to anyone who can reach it on the local network | Run behind a firewall or on localhost only |
+| **Paper trading only** | No real order execution is implemented | By design — graduate to live trading only after validating your strategy |
+
+---
+
+## Short-Term Enhancements
+
+These are improvements that can be made with relatively small effort:
+
+<Columns cols="2">
+  <Card title="Dynamic ISIN loader" icon="refresh-cw" horizontal="false">
+    Download the full Upstox instruments JSON daily and auto-update the instrument key mappings — no more stale ISINs after corporate actions.
+  </Card>
+
+  <Card title="Batch signal endpoint" icon="layers" horizontal="false">
+    A single `GET /api/upstox/signals/batch` endpoint that computes signals for all NIFTY 50 stocks in parallel, reducing the time to load the full signal table.
+  </Card>
+
+  <Card title="WebSocket price streaming" icon="radio" horizontal="false">
+    Replace the current 30-second polling interval in the Paper Trading view with real-time tick updates via the Upstox WebSocket feed.
+  </Card>
+
+  <Card title="Multi-LLM selector in UI" icon="cpu" horizontal="false">
+    A dropdown in the dashboard to switch the AI pipeline between GPT-4, Claude, and Gemini without editing config files.
+  </Card>
+
+  <Card title="Prediction accuracy dashboard" icon="bar-chart-2" horizontal="false">
+    Richer charts showing win rate trends over time, accuracy by market condition (uptrend/downtrend), and per-agent accuracy attribution.
+  </Card>
+
+  <Card title="Alert notifications" icon="bell" horizontal="false">
+    Send Telegram or Discord notifications when the auto-scanner enters or exits a position, or when a strong signal is detected.
+  </Card>
+</Columns>
+
+---
+
+## Medium-Term Enhancements
+
+| Enhancement | Benefit |
+|---|---|
+| **Backtesting engine** | Run any signal strategy against historical data to validate performance before deploying it live |
+| **Options chain analysis** | IV percentile, max pain levels, and put-call ratio for options traders |
+| **Portfolio heatmap** | Visual sector allocation view to spot concentration risk at a glance |
+| **Mobile-responsive UI** | Full support for trading and monitoring on mobile devices |
+| **Strategy builder** | Configure custom indicator combinations and thresholds without editing code |
+
+---
+
+## Long-Term Vision
+
+| Enhancement | Benefit |
+|---|---|
+| **Live Upstox order execution** | Graduate from paper trading to real orders with proper risk controls |
+| **Multi-exchange support** | BSE, MCX (commodities), and crypto exchange integration |
+| **AI memory system** | Agents learn from past prediction accuracy and adapt their analysis style over time |
+| **Strategy marketplace** | Share and import community-built signal configurations |
+| **Cloud deployment with user accounts** | Kubernetes-hosted multi-tenant version with per-user portfolios and strategies |
+
+---
+
+## Contributing
+
+TradeBotX is open-source. To contribute:
+
+<Steps>
+  <Step title="Fork and clone the repository" icon="git-branch" title-type="p">
+    Fork the repo on GitHub and clone your fork locally.
+  </Step>
+
+  <Step title="Create a feature branch" icon="git-merge" title-type="p">
+    ```bash
+    git checkout -b feature/your-feature-name
+    ```
+  </Step>
+
+  <Step title="Make your changes" icon="edit" title-type="p">
+    Keep changes focused on a single concern per PR. Add tests for new indicator logic in `technical.py`.
+  </Step>
+
+  <Step title="Open a pull request" icon="upload" title-type="p">
+    Describe what changed and why. Include before/after screenshots for UI changes.
+  </Step>
+</Steps>
+
+<Callout kind="tip">
+  The highest-value contributions right now are the **dynamic ISIN loader** and **batch signal endpoint** — both are well-scoped and have clear acceptance criteria.
+</Callout>

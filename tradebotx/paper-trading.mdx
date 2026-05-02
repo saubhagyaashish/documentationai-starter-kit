@@ -1,0 +1,131 @@
+---
+title: Paper Trading
+description: How TradeBotX's paper trading engine works — order lifecycle, risk management rules, exit triggers, and state persistence.
+---
+
+## Overview
+
+The paper trading engine (`paper_trader.py`) simulates real stock trades without using actual money. Every entry and exit goes through pre-flight risk checks, slippage simulation, and automatic stop-loss / take-profit monitoring.
+
+<Callout kind="info">
+  Paper trading is entirely simulated. No orders are sent to any broker or exchange. It is designed to let you test strategies and build confidence before risking real capital.
+</Callout>
+
+## Order Lifecycle
+
+### Entering a Trade
+
+When a BUY signal is triggered (manually or by the auto-scanner), the engine runs these checks in order before creating a position:
+
+<Steps>
+  <Step title="Daily loss limit check" icon="shield" title-type="p">
+    If today's P&L has already hit **-2% of total capital**, all new entries are blocked for the rest of the trading day.
+  </Step>
+
+  <Step title="Circuit breaker check" icon="zap" title-type="p">
+    If 3 consecutive trades have been losses, a **30-minute cool-down** is enforced before new positions can be entered.
+  </Step>
+
+  <Step title="Max positions check" icon="layers" title-type="p">
+    A maximum of **5 concurrent open positions** is allowed. If the portfolio is full, the trade is rejected.
+  </Step>
+
+  <Step title="Duplicate position check" icon="copy" title-type="p">
+    If a position in the same stock is already open, the trade is rejected to prevent unintentional pyramiding.
+  </Step>
+
+  <Step title="Position size check" icon="percent" title-type="p">
+    Each trade is sized at **5% of total capital**. If the calculated trade value exceeds available capital, the trade is rejected.
+  </Step>
+
+  <Step title="Slippage applied" icon="trending-up" title-type="p">
+    A simulated slippage of **+0.05%** is added to the entry price to model realistic fill prices in a live market.
+  </Step>
+
+  <Step title="Position created and saved" icon="save" title-type="p">
+    The position object is created, capital is reserved, and the trade is inserted into the `paper_trades` SQLite table.
+  </Step>
+</Steps>
+
+### Exiting a Trade
+
+Positions are closed by one of six triggers:
+
+| Exit Trigger | Condition | How It Fires |
+|---|---|---|
+| **Stop Loss** | Price ≤ entry price − stop distance | Automatic, checked every signal scan cycle |
+| **Target** | Price ≥ take-profit level set at entry | Automatic, checked every signal scan cycle |
+| **Trailing Stop** | Price retraces from the highest point reached | Automatic, adjusted upward as price rises |
+| **Time Exit** | Clock hits **15:20 IST** | Automatic, enforced by the scheduler |
+| **Signal Weak** | Composite signal score drops to ≤ 0.35 | Automatic, evaluated each scanner cycle |
+| **Manual** | User clicks "Exit" in the dashboard | Immediate on button click |
+
+A slippage of **-0.05%** is applied to exit prices to simulate realistic fills.
+
+## Risk Management Rules
+
+| Rule | Value | Rationale |
+|---|---|---|
+| Max daily loss | −2% of capital | Prevents catastrophic drawdown days |
+| Max concurrent positions | 5 | Ensures portfolio diversification |
+| Position size per trade | 5% of capital | Eliminates single-stock concentration risk |
+| Stop-loss requirement | Mandatory on every entry | Capital protection — no naked trades |
+| Circuit breaker | 3 consecutive losses → 30-min pause | Forces a cool-down after a losing streak |
+| Time-based exit | Force-close at 15:20 IST | Eliminates overnight gap risk |
+| Entry slippage | +0.05% | Simulates realistic fill quality |
+| Exit slippage | −0.05% | Simulates realistic fill quality |
+
+## Portfolio Dashboard
+
+The paper trading UI shows:
+
+- **Open Positions** — current holdings with live P&L, entry price, stop-loss, and target
+- **Available Capital** — capital not currently deployed
+- **Today's P&L** — cumulative intraday profit/loss in ₹ and %
+- **Total P&L** — lifetime paper trading P&L since inception
+- **Win Rate** — percentage of closed trades that were profitable
+- **Trade History** — all closed trades with entry/exit details and exit reason
+
+## State Persistence
+
+The engine survives server restarts. On shutdown, all state is stored in SQLite. On startup, it reconstructs:
+
+1. **Open positions** — from rows in `paper_trades` where `exit_time IS NULL`
+2. **Daily statistics** — from `paper_portfolio` snapshot for today's date
+3. **Circuit breaker state** — from the last 3 closed trades' outcomes
+4. **Available capital** — total capital minus sum of reserved capital in open positions
+
+## API Reference
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/paper/portfolio` | Full portfolio state: positions, capital, stats |
+| `POST` | `/api/paper/buy` | Enter a paper trade |
+| `POST` | `/api/paper/sell` | Exit a specific position |
+| `GET` | `/api/paper/history` | All closed trades |
+| `GET` | `/api/paper/performance` | Win rate, P&L breakdown, accuracy stats |
+
+### Example: Place a Paper Buy
+
+```bash
+POST /api/paper/buy
+Content-Type: application/json
+
+{
+  "symbol": "RELIANCE",
+  "instrument_key": "NSE_EQ|INE002A01018",
+  "stop_loss": 2890.00,
+  "target_price": 3050.00,
+  "signal_score": 0.73
+}
+
+# Response
+{
+  "status": "success",
+  "trade_id": 42,
+  "entry_price": 2946.97,
+  "quantity": 5,
+  "capital_reserved": 14734.85,
+  "message": "PAPER BUY confirmed: 5 shares of RELIANCE @ ₹2946.97"
+}
+```

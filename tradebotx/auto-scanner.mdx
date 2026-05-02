@@ -1,0 +1,137 @@
+---
+title: Auto-Scanner
+description: How the autonomous trading bot monitors NIFTY 50 every 5 minutes, filters movers, scores signals, and auto-enters or exits paper positions.
+---
+
+## Overview
+
+The auto-scanner (`signal_scanner.py`) is an autonomous trading bot that runs continuously during market hours. Every 5 minutes it:
+
+1. Fetches live prices for all NIFTY 50 stocks in a **single batch API call**
+2. Filters for stocks moving more than 0.5% in either direction
+3. Computes composite signal scores for the top 15 movers
+4. Auto-enters positions on strong BUY signals and auto-exits on weak SELL signals
+
+<Callout kind="alert">
+  The auto-scanner is **disabled by default**. It must be explicitly started from the dashboard or via the API. It will not run on its own when the server starts.
+</Callout>
+
+## Scan Cycle (Every 5 Minutes)
+
+<Steps>
+  <Step title="Batch LTP fetch" icon="download" title-type="p">
+    One API call fetches live prices for all 48 NIFTY 50 stocks simultaneously, minimizing Upstox rate limit usage.
+  </Step>
+
+  <Step title="Filter movers" icon="filter" title-type="p">
+    Stocks with an intraday price change of less than ±0.5% are excluded. Only meaningful movers continue to signal computation.
+  </Step>
+
+  <Step title="Compute signals for top 15" icon="bar-chart-2" title-type="p">
+    The top 15 movers by absolute % change get full technical indicator analysis (RSI, MACD, VWAP, etc.) and a composite signal score.
+  </Step>
+
+  <Step title="Auto-enter on strong BUY" icon="trending-up" title-type="p">
+    If a stock scores ≥ 0.65 **and** its price is moving upward, the scanner automatically enters a paper BUY position — subject to all risk management pre-flight checks.
+  </Step>
+
+  <Step title="Auto-exit on weak signal" icon="trending-down" title-type="p">
+    If an open position's stock now scores ≤ 0.35, the scanner automatically exits the position with exit reason `SIGNAL_WEAK`.
+  </Step>
+
+  <Step title="Check stop-loss and take-profit" icon="shield" title-type="p">
+    All open positions are checked against their stop-loss and target levels using the latest batch prices.
+  </Step>
+
+  <Step title="Force-close at 15:20 IST" icon="clock" title-type="p">
+    Five minutes before market close, all remaining open positions are force-closed with exit reason `TIME_EXIT` to avoid overnight risk.
+  </Step>
+</Steps>
+
+## Signal Thresholds
+
+| Signal Score | Direction | Action |
+|---|---|---|
+| ≥ 0.65 | Price moving UP | Auto-enter BUY |
+| ≤ 0.35 | Holding position | Auto-exit (SIGNAL_WEAK) |
+| 0.35 – 0.65 | Any | No action taken |
+
+## Scanner Configuration
+
+The scanner's behaviour can be customised via the dashboard or the API:
+
+| Setting | Default | Description |
+|---|---|---|
+| `scan_interval_seconds` | 300 | How often to run a full scan cycle |
+| `min_move_pct` | 0.5 | Minimum intraday % move to qualify for signal computation |
+| `top_movers_count` | 15 | How many top movers to compute signals for per cycle |
+| `buy_threshold` | 0.65 | Composite score threshold to trigger a BUY |
+| `sell_threshold` | 0.35 | Composite score threshold to trigger a SELL / exit |
+| `auto_trade` | true | Whether to actually place paper trades or just report signals |
+
+```bash
+# Update scanner config
+POST /api/scanner/config
+{
+  "scan_interval_seconds": 180,
+  "buy_threshold": 0.70,
+  "top_movers_count": 10
+}
+```
+
+## Managing the Scanner
+
+<Tabs>
+  <Tab title="Via Dashboard">
+    1. Open the **Paper Trading** tab.
+    2. Click the **Start Scanner** button in the Auto-Scanner card.
+    3. The scanner status indicator turns green and shows the last scan time.
+    4. Click **Stop Scanner** to pause it.
+  </Tab>
+
+  <Tab title="Via API">
+    ```bash
+    # Start
+    POST /api/scanner/start
+
+    # Stop
+    POST /api/scanner/stop
+
+    # Check status
+    GET /api/scanner/status
+
+    # Trigger an immediate scan (without waiting for the interval)
+    POST /api/scanner/scan-now
+    ```
+  </Tab>
+</Tabs>
+
+## Scanner Status Response
+
+```json
+GET /api/scanner/status
+
+{
+  "running": true,
+  "last_scan_at": "2025-01-15T10:30:00+05:30",
+  "next_scan_at": "2025-01-15T10:35:00+05:30",
+  "scans_today": 42,
+  "auto_trades_today": 3,
+  "last_signals": [
+    { "symbol": "RELIANCE", "score": 0.72, "signal": "BUY", "action": "ENTERED" },
+    { "symbol": "TCS", "score": 0.61, "signal": "HOLD", "action": "SKIPPED" },
+    { "symbol": "WIPRO", "score": 0.31, "signal": "SELL", "action": "EXITED" }
+  ]
+}
+```
+
+## Morning Pre-Market Scanner
+
+A separate scheduled job in `scheduler.py` (powered by APScheduler) runs a **pre-market screen** every trading day at **9:00 AM IST**, before the NSE open:
+
+- Fetches overnight news and global cues
+- Screens all NIFTY 50 stocks for fundamental/news-based flags
+- Generates a morning watchlist of stocks worth monitoring
+- Results appear in the **Screener** tab when you open the dashboard
+
+The morning scanner runs independently of the auto-scanner and does not place trades.
