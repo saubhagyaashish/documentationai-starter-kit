@@ -1,100 +1,144 @@
 ---
 title: Database Schema
-description: SQLite tables used by TradeBotX — predictions, paper trades, and daily portfolio snapshots.
+description: SQLite schema for TradeBotX — three tables (predictions, paper_trades, paper_portfolio), data flow, SQL queries, thread safety, and maintenance.
 ---
 
 ## Overview
 
-TradeBotX uses **SQLite** for all persistent storage. The database file (`tradebotx.db`) is created automatically in the project root on first run. There are three tables — one for AI predictions, one for paper trades, and one for daily portfolio snapshots.
+TradeBotX uses **SQLite** (`predictions.db`) for all persistent storage. The file is created automatically in the project root on first run.
 
-All queries go through `database.py` using Python's built-in `sqlite3` module. No ORM is used.
+| Table | Stores | Used By |
+|---|---|---|
+| `predictions` | Every LLM analysis result with outcomes | PredictionsView accuracy dashboard |
+| `paper_trades` | All auto-scanner and manual trades (open + closed) | PaperTradingView history |
+| `paper_portfolio` | Current portfolio state and daily metrics | DashboardView, PaperTradingView |
+
+**Thread-safe:** All operations wrapped in `threading.RLock()` — no race conditions, no "database is locked" errors.
 
 ---
 
-## Table: `predictions`
+## Table: predictions
 
-Stores every AI pipeline result.
+Stores every LLM analysis result from `/api/analyze/stream`.
 
+| Column | Type | Description |
+|---|---|---|
+| `id` | INTEGER PRIMARY KEY | Auto-increment |
+| `ticker` | TEXT NOT NULL | Stock symbol (e.g., "INFY.NS") |
+| `trade_date` | TEXT NOT NULL | Analysis date (YYYY-MM-DD) |
+| `decision` | TEXT NOT NULL | BUY, SELL, HOLD, OVERWEIGHT, UNDERWEIGHT |
+| `rating` | TEXT | LLM confidence rating (1/5 to 5/5) |
+| `price_at_prediction` | REAL | Stock price when analysis ran |
+| `current_price` | REAL | Latest LTP (updated periodically) |
+| `return_pct` | REAL | `(current - entry) / entry × 100` |
+| `is_win` | INTEGER | 1 = win, 0 = loss, NULL = pending |
+| `outcome_checked_at` | TEXT | When outcome was determined |
+| `created_at` | TEXT NOT NULL | ISO 8601 timestamp |
+
+**Indexes:**
 ```sql
-CREATE TABLE predictions (
-    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-    ticker              TEXT NOT NULL,
-    trade_date          TEXT NOT NULL,          -- YYYY-MM-DD
-    decision            TEXT NOT NULL,          -- BUY | SELL | HOLD
-    rating              REAL,                   -- 0.0–1.0 confidence score
-    price_at_prediction REAL,
-    current_price       REAL,                   -- price when outcome was checked
-    return_pct          REAL,
-    is_win              INTEGER,                -- 1 = correct, 0 = wrong, NULL = unchecked
-    outcome_checked_at  TEXT,
-    reports_json        TEXT,                   -- full agent reports as JSON
-    created_at          TEXT DEFAULT (datetime('now'))
-);
+CREATE INDEX idx_predictions_ticker ON predictions(ticker);
+CREATE INDEX idx_predictions_date   ON predictions(trade_date DESC);
+CREATE INDEX idx_predictions_rating ON predictions(rating);
 ```
 
-| Column | Description |
-|---|---|
-| `rating` | Portfolio Manager's confidence score (0.0–1.0) |
-| `is_win` | `1` if decision proved correct, `0` if wrong, `NULL` if not yet checked |
-| `reports_json` | Full JSON of all 13 agent reports — useful for audit and review |
-
 ---
 
-## Table: `paper_trades`
+## Table: paper_trades
 
-One row per paper trade — both open and closed positions.
+One row per trade — both open positions and completed trades.
 
+| Column | Type | Description |
+|---|---|---|
+| `id` | INTEGER PRIMARY KEY | Auto-increment |
+| `symbol` | TEXT NOT NULL | Stock symbol (e.g., "INFY.NS") |
+| `direction` | TEXT NOT NULL | "BUY" or "SELL" |
+| `quantity` | INTEGER NOT NULL | Number of shares |
+| `entry_price` | REAL NOT NULL | Entry price |
+| `exit_price` | REAL | Exit price (NULL if still open) |
+| `entry_time` | TEXT NOT NULL | Entry timestamp (ISO 8601) |
+| `exit_time` | TEXT | Exit timestamp (NULL if open) |
+| `pnl` | REAL | P&L in rupees: `(exit - entry) × qty` |
+| `pnl_pct` | REAL | P&L percentage |
+| `stop_loss` | REAL NOT NULL | Stop-loss price |
+| `target_price` | REAL NOT NULL | Target price |
+| `exit_reason` | TEXT | SL_HIT, TARGET_HIT, TIME_STOP, MANUAL, TRAILING_STOP |
+| `strategy` | TEXT | TECHNICAL_SIGNAL or MANUAL |
+
+**Indexes:**
 ```sql
-CREATE TABLE paper_trades (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    symbol          TEXT NOT NULL,
-    instrument_key  TEXT NOT NULL,
-    side            TEXT NOT NULL,              -- BUY | SELL
-    quantity        INTEGER NOT NULL,
-    entry_price     REAL NOT NULL,
-    exit_price      REAL,                       -- NULL while open
-    entry_time      TEXT NOT NULL,
-    exit_time       TEXT,                       -- NULL while open
-    stop_loss       REAL,
-    target_price    REAL,
-    pnl             REAL,                       -- NULL while open
-    pnl_pct         REAL,
-    is_win          INTEGER,
-    exit_reason     TEXT,                       -- STOP_LOSS | TARGET | TRAILING_STOP
-                                                --   TIME_EXIT | SIGNAL_WEAK | MANUAL
-    strategy        TEXT,                       -- "auto_scanner" | "manual"
-    signal_context  TEXT,                       -- JSON snapshot of indicators at entry
-    created_at      TEXT DEFAULT (datetime('now'))
-);
+CREATE INDEX idx_trades_symbol_exit ON paper_trades(symbol, exit_time);
+CREATE INDEX idx_trades_date_range  ON paper_trades(exit_time DESC);
 ```
 
-| Column | Description |
-|---|---|
-| `exit_price` / `exit_time` | `NULL` while the position is still open |
-| `exit_reason` | Why the position was closed — useful for strategy analysis |
-| `signal_context` | Snapshot of all indicator values at the time of entry |
-| `strategy` | `"auto_scanner"` for bot trades, `"manual"` for user-initiated trades |
+---
+
+## Table: paper_portfolio
+
+Single-row table (id = 1) storing current portfolio state. Recalculated on every trade and every 5 minutes.
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | INTEGER PRIMARY KEY | Always 1 |
+| `capital` | REAL NOT NULL | Current cash available |
+| `initial_capital` | REAL NOT NULL | Starting capital (100,000) |
+| `total_pnl` | REAL | All-time P&L |
+| `total_pnl_pct` | REAL | All-time return % |
+| `daily_pnl` | REAL | Today's P&L |
+| `daily_trades` | INTEGER | Trades executed today |
+| `daily_wins` | INTEGER | Wins today |
+| `daily_losses` | INTEGER | Losses today |
+| `total_trades` | INTEGER | All-time trade count |
+| `total_wins` | INTEGER | All-time wins |
+| `total_win_rate` | REAL | All-time win rate (0.0–1.0) |
+| `daily_loss_limit_active` | INTEGER | 1 = circuit breaker triggered |
+| `last_updated` | TEXT | When portfolio was last recalculated |
+
+**Daily Reset:** Every morning at 08:30 IST, `daily_pnl`, `daily_trades`, `daily_wins`, `daily_losses` reset to 0. All-time metrics accumulate.
 
 ---
 
-## Table: `paper_portfolio`
+## Data Flow
 
-Daily portfolio snapshots for P&L charting.
+### On Auto-Trade Entry
 
-```sql
-CREATE TABLE paper_portfolio (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    date            TEXT NOT NULL UNIQUE,       -- YYYY-MM-DD
-    capital         REAL NOT NULL,
-    daily_pnl       REAL DEFAULT 0,
-    total_pnl       REAL DEFAULT 0,
-    open_positions  INTEGER DEFAULT 0,
-    daily_trades    INTEGER DEFAULT 0,
-    daily_wins      INTEGER DEFAULT 0,
-    daily_losses    INTEGER DEFAULT 0,
-    win_rate        REAL DEFAULT 0,
-    created_at      TEXT DEFAULT (datetime('now'))
-);
+```
+signal_scanner.py: score > threshold
+    ↓
+paper_trader.enter_trade(symbol, qty, price, SL, TP)
+    ↓
+Risk checks:
+  • daily_pnl >= -2% * initial_capital?
+  • qty * price <= 5% * capital?
+  • len(open_positions) < max_auto_positions?
+    ↓
+INSERT INTO paper_trades (direction='BUY', ...)
+UPDATE paper_portfolio: capital -= (qty * price * 1.0005)  ← 0.05% slippage
+    ↓
+Scanner monitors every 5 min:
+  • price <= stop_loss → EXIT
+  • price >= target → EXIT
+  • trailing_stop triggered → EXIT
+  • 15:20 IST → FORCE EXIT
+```
+
+### On Trade Exit
+
+```
+paper_trader.exit_trade(trade_id, exit_price, reason)
+    ↓
+pnl = (exit_price - entry_price) * qty
+    ↓
+UPDATE paper_trades: exit_price, exit_time, pnl, exit_reason
+UPDATE paper_portfolio:
+  • capital += (exit_price * qty) - fees
+  • daily_pnl += pnl
+  • daily_wins / daily_losses incremented
+  • total_pnl += pnl, total_trades += 1
+    ↓
+Check circuit breaker:
+  • daily_pnl < -2% * initial_capital → daily_loss_limit_active = 1
+  • Active → scanner stops entering new trades (existing positions still monitored)
 ```
 
 ---
@@ -102,62 +146,145 @@ CREATE TABLE paper_portfolio (
 ## Useful Queries
 
 <Tabs>
-  <Tab title="Win Rate" icon="percent">
+  <Tab title="Portfolio Summary" icon="dollar-sign">
     ```sql
-    -- Overall prediction win rate
     SELECT
-      COUNT(*) AS total,
-      SUM(is_win) AS wins,
-      ROUND(100.0 * SUM(is_win) / COUNT(*), 1) AS win_rate_pct
-    FROM predictions
-    WHERE is_win IS NOT NULL;
+      capital,
+      initial_capital,
+      total_pnl,
+      ROUND(100.0 * total_pnl / initial_capital, 2) AS roi_pct,
+      total_trades,
+      total_wins,
+      ROUND(100.0 * total_wins / NULLIF(total_trades, 0), 1) AS win_rate,
+      daily_pnl,
+      daily_trades
+    FROM paper_portfolio;
     ```
   </Tab>
   <Tab title="Open Positions" icon="list">
     ```sql
-    -- All currently open paper positions
-    SELECT symbol, entry_price, stop_loss, target_price, entry_time
+    SELECT
+      symbol,
+      quantity,
+      entry_price,
+      stop_loss,
+      target_price,
+      entry_time
     FROM paper_trades
-    WHERE exit_time IS NULL;
+    WHERE exit_time IS NULL
+    ORDER BY entry_time DESC;
     ```
   </Tab>
-  <Tab title="Exit Reasons" icon="bar-chart">
+  <Tab title="Win Rate by Rating" icon="percent">
     ```sql
-    -- Most common exit reasons
-    SELECT exit_reason, COUNT(*) AS count
-    FROM paper_trades
-    WHERE exit_time IS NOT NULL
-    GROUP BY exit_reason
-    ORDER BY count DESC;
-    ```
-  </Tab>
-  <Tab title="Per-Stock Accuracy" icon="trending-up">
-    ```sql
-    -- Win rate by ticker
-    SELECT ticker,
-      COUNT(*) AS calls,
+    SELECT
+      rating,
+      COUNT(*) AS count,
       SUM(is_win) AS wins,
-      ROUND(100.0 * SUM(is_win) / COUNT(*), 1) AS win_pct
+      ROUND(100.0 * AVG(is_win), 1) AS win_rate_pct,
+      ROUND(AVG(return_pct), 2) AS avg_return_pct
     FROM predictions
     WHERE is_win IS NOT NULL
-    GROUP BY ticker
-    ORDER BY win_pct DESC;
+    GROUP BY rating
+    ORDER BY rating DESC;
+    ```
+  </Tab>
+  <Tab title="Daily P&L" icon="calendar">
+    ```sql
+    SELECT
+      DATE(exit_time) AS trade_date,
+      COUNT(*) AS trades,
+      SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) AS wins,
+      ROUND(SUM(pnl), 2) AS daily_pnl,
+      ROUND(100.0 * AVG(pnl), 2) AS avg_pnl_per_trade
+    FROM paper_trades
+    WHERE exit_time IS NOT NULL
+    GROUP BY DATE(exit_time)
+    ORDER BY trade_date DESC;
+    ```
+  </Tab>
+  <Tab title="Per-Symbol Performance" icon="trending-up">
+    ```sql
+    SELECT
+      symbol,
+      COUNT(*) AS trades,
+      ROUND(SUM(pnl), 2) AS total_pnl,
+      ROUND(100.0 * SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) / COUNT(*), 0) AS win_rate
+    FROM paper_trades
+    WHERE exit_time IS NOT NULL
+    GROUP BY symbol
+    ORDER BY total_pnl DESC;
     ```
   </Tab>
 </Tabs>
 
 ---
 
-## Backup and Reset
+## Thread Safety
 
+All database operations wrapped with `threading.RLock()`:
+
+```python
+# paper_trader.py
+self._db_lock = threading.RLock()
+
+def enter_trade(self, symbol, qty, price, sl, tp):
+    with self._db_lock:           # ← acquire lock
+        conn = self._conn()
+        conn.execute("INSERT INTO paper_trades ...", (...))
+        conn.execute("UPDATE paper_portfolio ...", (...))
+        conn.commit()
+                                  # ← release lock (auto)
+
+# api_server.py
+_state_lock = threading.RLock()
+
+@app.post("/api/paper/buy")
+async def buy():
+    with _state_lock:             # ← serialize all HTTP access
+        paper_trader.enter_trade(...)
+```
+
+**Result:** No lost updates, no "database is locked" errors, no data corruption under concurrent access.
+
+---
+
+## Maintenance
+
+### Backup Database
 ```bash
-# Back up before changes
-cp tradebotx.db tradebotx.db.bak
+# Copy the database
+cp predictions.db predictions.db.backup
 
-# Reset paper trading (keeps all AI predictions)
-sqlite3 tradebotx.db "DELETE FROM paper_trades; DELETE FROM paper_portfolio;"
+# Export all trades to CSV
+sqlite3 predictions.db ".mode csv" ".output trades.csv" "SELECT * FROM paper_trades;"
+```
+
+### Reset Portfolio (Start Fresh)
+```bash
+# Delete database — api_server.py will recreate it with fresh tables
+del predictions.db
+
+# Restart the backend
+python api_server.py
 ```
 
 <Callout kind="alert">
-  Resetting paper trades also resets the circuit breaker and daily loss counters, since both are reconstructed from the trade table on startup.
+  Deleting `predictions.db` removes all prediction history and trade records permanently. Back it up first.
 </Callout>
+
+### Check Database Health
+```bash
+sqlite3 predictions.db "PRAGMA integrity_check;"
+sqlite3 predictions.db "VACUUM;"    # Reduce file size
+```
+
+---
+
+## Schema Version History
+
+| Version | Date | Changes |
+|---|---|---|
+| 1.0 | 2026-04-15 | Initial schema: predictions, paper_trades, paper_portfolio |
+| 1.1 | 2026-05-01 | Added indexes for ticker, exit_time; thread-safe locking |
+| 1.2 | 2026-05-03 | Added daily_loss_limit_active tracking in paper_portfolio |

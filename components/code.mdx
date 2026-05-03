@@ -1,113 +1,226 @@
 ---
-title: Auto-Scanner
-description: How the autonomous trading bot monitors NIFTY 50 every 5 minutes, filters movers, scores signals, and auto-enters or exits paper positions.
+title: Auto-Scanner & Scheduler Jobs
+description: How APScheduler runs the pre-market scan, intraday signal scanner, and portfolio update — with config, market-hour awareness, and troubleshooting.
 ---
 
 ## Overview
 
-The auto-scanner (`signal_scanner.py`) is an autonomous trading bot that runs continuously during market hours. Every 5 minutes it fetches live prices for all NIFTY 50 stocks, filters for meaningful movers, scores their technical signals, and auto-enters or exits paper positions based on those scores.
+TradeBotX uses **APScheduler** to run three background jobs automatically. All jobs are **NSE-calendar aware** — they skip weekends and NSE holidays.
+
+```
+APScheduler (BackgroundScheduler, IST timezone)
+├── Job 1: Pre-Market Scan   — 08:30 IST daily (on trading days)
+├── Job 2: Signal Scanner    — Every 5 min (09:30–15:20 IST)
+└── Job 3: Portfolio Update  — Every 5 min (all day)
+```
 
 <Callout kind="alert">
-  The auto-scanner is **disabled by default**. It must be explicitly started from the dashboard or via the API. It does not run on server startup.
+  The auto-scanner is **disabled by default** (`"enabled": false` in `config.json`). Enable it explicitly and start with small position sizes before scaling up.
 </Callout>
 
-## Scan Cycle — Every 5 Minutes
+## Job 1 — Pre-Market Scan (08:30 IST)
 
-<Steps>
-  <Step title="Batch LTP fetch" icon="download" title-type="p">
-    One API call fetches live prices for all 48 NIFTY 50 stocks — minimising Upstox rate-limit usage.
-  </Step>
-  <Step title="Filter movers" icon="filter" title-type="p">
-    Stocks with an intraday change of less than ±0.5% are skipped. Only meaningful movers continue.
-  </Step>
-  <Step title="Compute signals for top 15" icon="bar-chart-2" title-type="p">
-    The top 15 movers by absolute % change get full technical indicator analysis and a composite signal score.
-  </Step>
-  <Step title="Auto-enter on strong BUY" icon="trending-up" title-type="p">
-    If a stock scores ≥ 0.65 **and** its price is moving upward, a paper BUY is entered — subject to all risk management pre-flight checks.
-  </Step>
-  <Step title="Auto-exit on weak signal" icon="trending-down" title-type="p">
-    If an open position's stock now scores ≤ 0.35, the position is closed with exit reason `SIGNAL_WEAK`.
-  </Step>
-  <Step title="Check stop-loss and take-profit" icon="shield" title-type="p">
-    All open positions are checked against their stop-loss and target levels using the latest batch prices.
-  </Step>
-  <Step title="Force-close at 15:20 IST" icon="clock" title-type="p">
-    Five minutes before NSE close, all remaining open positions are force-closed with exit reason `TIME_EXIT`.
-  </Step>
-</Steps>
+Runs before market opens every trading day:
+1. Fetches stocks from custom watchlist or NIFTY 50 index
+2. Screens for RSI extremes, volume spikes, price gaps
+3. Runs full 13-agent LLM pipeline on top 5 flagged stocks
+4. Writes results to `morning_report.json` for the dashboard
 
-## Signal Thresholds
-
-| Score | Direction | Action |
-|---|---|---|
-| ≥ 0.65 | Price moving UP | Auto-enter BUY |
-| ≤ 0.35 | Holding a position | Auto-exit (SIGNAL_WEAK) |
-| 0.35 – 0.65 | Any | No action |
-
-## Scanner Configuration
-
-| Setting | Default | Description |
-|---|---|---|
-| `scan_interval_seconds` | 300 | How often to run a full scan cycle |
-| `min_move_pct` | 0.5 | Minimum intraday % change to qualify for scoring |
-| `top_movers_count` | 15 | How many top movers to score per cycle |
-| `buy_threshold` | 0.65 | Score required to trigger a BUY |
-| `sell_threshold` | 0.35 | Score that triggers a SELL / exit |
-| `auto_trade` | true | Whether to place trades or just report signals |
-
-```bash
-POST http://localhost:8000/api/scanner/config
+**Configuration:**
+```json
 {
-  "scan_interval_seconds": 180,
-  "buy_threshold": 0.70,
-  "top_movers_count": 10
+  "scheduler": {
+    "enabled": true,
+    "scan_time_ist": "08:30",
+    "watchlist_source": "index",
+    "index_name": "NIFTY 50",
+    "max_stocks_to_analyse": 5,
+    "only_analyse_flagged": true
+  }
 }
 ```
 
-## Managing the Scanner
-
-<Tabs>
-  <Tab title="Dashboard" icon="monitor">
-    1. Open the **Paper Trading** tab.
-    2. Click **Start Scanner** in the Auto-Scanner card.
-    3. The status indicator turns green and shows the last scan time.
-    4. Click **Stop Scanner** to pause it.
-  </Tab>
-  <Tab title="API" icon="code">
-    ```bash
-    POST /api/scanner/start     # Start
-    POST /api/scanner/stop      # Stop
-    GET  /api/scanner/status    # Check state
-    POST /api/scanner/scan-now  # Trigger immediate scan
-    ```
-  </Tab>
-</Tabs>
-
-## Scanner Status Response
-
+**Output — `morning_report.json`:**
 ```json
 {
-  "running": true,
-  "last_scan_at": "2025-01-15T10:30:00+05:30",
-  "next_scan_at": "2025-01-15T10:35:00+05:30",
-  "scans_today": 42,
-  "auto_trades_today": 3,
-  "last_signals": [
-    { "symbol": "RELIANCE", "score": 0.72, "signal": "BUY",  "action": "ENTERED" },
-    { "symbol": "TCS",      "score": 0.61, "signal": "HOLD", "action": "SKIPPED" },
-    { "symbol": "WIPRO",    "score": 0.31, "signal": "SELL", "action": "EXITED"  }
+  "started_at": "2026-05-03T08:30:00+05:30",
+  "finished_at": "2026-05-03T09:05:30+05:30",
+  "screened_count": 50,
+  "flagged_count": 5,
+  "results": [
+    {
+      "ticker": "RELIANCE.NS",
+      "decision": "BUY",
+      "confidence": 4.5,
+      "entry_price": 2850,
+      "stop_loss": 2750
+    }
   ]
 }
 ```
 
-## Morning Pre-Market Scanner
+**Manual trigger:**
+```bash
+curl -X POST http://localhost:8000/api/scan/morning
+```
 
-A separate job in `scheduler.py` (APScheduler) runs a **pre-market screen at 9:00 AM IST** every trading day:
+## Job 2 — Intraday Signal Scanner (Every 5 min)
 
-- Fetches overnight news and global market cues
-- Screens all NIFTY 50 stocks for fundamental and news-based flags
-- Generates a morning watchlist of stocks worth monitoring that day
-- Results appear in the **Screener** tab when you open the dashboard
+The auto-trading engine. Runs every 5 minutes between 09:30 and 15:20 IST on trading days.
 
-The morning scanner runs independently of the intraday auto-scanner and does not place any trades.
+**Scan cycle:**
+
+<Steps>
+  <Step title="Batch LTP fetch" icon="download" title-type="p">
+    One Upstox API call fetches live prices for all 50 NIFTY stocks simultaneously.
+  </Step>
+  <Step title="Score all 50 stocks" icon="bar-chart-2" title-type="p">
+    `technical.py` computes 9 indicators using cached daily candles (60-min TTL) and fresh 5-min bars. Each stock gets a composite score 0–1.0. Total time: under 1 second.
+  </Step>
+  <Step title="Auto-entry" icon="trending-up" title-type="p">
+    Score > 0.65 → enter paper trade (subject to: daily loss limit, position count ≤ 3, position size ≤ 5% capital). Logs: `AUTO BUY: INFY 10 shares @ ₹1850 (score 0.72)`.
+  </Step>
+  <Step title="Auto-exit checks" icon="trending-down" title-type="p">
+    For each open position: score < 0.35 → SELL; price ≤ stop-loss → SELL; price ≥ target → SELL; trailing stop triggered → SELL; 15:20 IST → force close all.
+  </Step>
+  <Step title="Portfolio update" icon="database" title-type="p">
+    `paper_portfolio` table updated: capital, daily P&L, win/loss counts, circuit breaker status.
+  </Step>
+</Steps>
+
+**Configuration:**
+```json
+{
+  "scanner": {
+    "enabled": true,
+    "interval_minutes": 5,
+    "index": "NIFTY50",
+    "buy_score_threshold": 0.65,
+    "sell_score_threshold": 0.35,
+    "max_auto_positions": 3,
+    "position_size_pct": 3.0,
+    "force_close_time": "15:20"
+  }
+}
+```
+
+**Typical trading day:**
+```
+08:30 IST — Pre-market scan runs (LLM analysis on 5 flagged stocks)
+09:35 IST — Scanner activates, Scan 1: INFY score 0.72 → AUTO BUY 10 shares @ ₹1850
+09:40 IST — Scan 2: RELIANCE score 0.71 → AUTO BUY 5 shares @ ₹2850
+09:45 IST — Scan 3: INFY price ₹1900 (TP hit) → AUTO SELL, P&L +₹500
+...
+15:20 IST — Force close: SELL all open positions at market
+Daily P&L: +₹1,250 (+1.25%)
+```
+
+**Control via API:**
+```bash
+curl -X POST http://localhost:8000/api/scanner/start   # Start
+curl -X POST http://localhost:8000/api/scanner/stop    # Pause
+curl http://localhost:8000/api/scanner/status          # Check state
+```
+
+**Scanner status response:**
+```json
+{
+  "is_running": true,
+  "last_scan_time": "2026-05-03T10:45:00+05:30",
+  "open_positions": 2,
+  "daily_pnl": 1500,
+  "auto_trades_today": 3
+}
+```
+
+## Job 3 — Portfolio Update (Every 5 min)
+
+Keeps P&L fresh without waiting for a trade to execute:
+1. Fetches latest LTP from Upstox for all open positions
+2. Recalculates unrealised P&L
+3. Checks SL/TP for dashboard alerts
+4. Monitors daily loss limit circuit breaker
+
+Runs all day (including post-market) so the dashboard always shows current values.
+
+## Configuration Presets
+
+<Tabs>
+  <Tab title="Conservative" icon="shield">
+    ```json
+    {
+      "scanner": {
+        "enabled": true,
+        "buy_score_threshold": 0.75,
+        "sell_score_threshold": 0.35,
+        "max_auto_positions": 1,
+        "position_size_pct": 1.0
+      }
+    }
+    ```
+    Expected: 0–1 trades/day, ~60% win rate
+  </Tab>
+  <Tab title="Balanced (Default)" icon="sliders">
+    ```json
+    {
+      "scanner": {
+        "enabled": true,
+        "buy_score_threshold": 0.65,
+        "sell_score_threshold": 0.35,
+        "max_auto_positions": 3,
+        "position_size_pct": 3.0
+      }
+    }
+    ```
+    Expected: 2–3 trades/day, ~52% win rate
+  </Tab>
+  <Tab title="Aggressive" icon="zap">
+    ```json
+    {
+      "scanner": {
+        "enabled": true,
+        "buy_score_threshold": 0.55,
+        "sell_score_threshold": 0.40,
+        "max_auto_positions": 3,
+        "position_size_pct": 3.0
+      }
+    }
+    ```
+    Expected: 3–5 trades/day, ~48% win rate
+  </Tab>
+</Tabs>
+
+## NSE Market Calendar
+
+All jobs use `nse_holidays.py` to skip non-trading days:
+- Market hours: **09:30–15:20 IST**, Monday–Friday
+- Pre-market scan runs at **08:30 IST** (before open)
+- No trading on weekends or NSE holidays (Holi, Diwali, Good Friday, etc.)
+
+```python
+from nse_holidays import is_trading_day, is_market_open
+
+if not is_trading_day(today):
+    logger.info("No trading today — weekend or holiday")
+    return
+```
+
+## API Cost per Day
+
+```
+Morning scan (08:30):  ~15 API calls
+Signal scanner (5 min): ~5–10 calls/scan × 24 scans = ~300 calls
+Portfolio update:        ~1 call/5 min × 288 = 288 calls
+Total: ~300–600 calls/day  (well within Upstox 1,000/day limit)
+```
+
+## Troubleshooting
+
+| Issue | Fix |
+|---|---|
+| Morning scan never runs | Check `logger.info("Scheduler started")` in startup logs |
+| Scanner runs but no trades | `"enabled": false` in config — set to `true` and restart |
+| "Scan already running" warning | Previous scan still in progress — normal if stocks are slow |
+| Duplicate jobs | Check `add_job()` calls in `api_server.py` — remove duplicates |
+| Force close not happening | Verify `"force_close_time": "15:20"` in config.json |
+| No trades on holiday | Expected — `nse_holidays.py` blocks trading on NSE holidays |

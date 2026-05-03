@@ -85,6 +85,16 @@
                 "title": "Database Schema",
                 "path": "components/tabs",
                 "icon": "database"
+              },
+              {
+                "title": "Frontend Components",
+                "path": "components/frontend",
+                "icon": "layout"
+              },
+              {
+                "title": "Thread Safety",
+                "path": "components/thread-safety",
+                "icon": "shield"
               }
             ]
           }
@@ -150,6 +160,14 @@
               {
                 "title": "Setup Guide",
                 "path": "help-center/guides/setup-project"
+              },
+              {
+                "title": "Testing Guide",
+                "path": "help-center/guides/testing"
+              },
+              {
+                "title": "Phase 0 Checklist",
+                "path": "help-center/guides/phase0"
               }
             ]
           }

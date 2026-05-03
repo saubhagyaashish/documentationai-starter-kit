@@ -1,0 +1,180 @@
+---
+title: Frontend Components
+description: React 19 component hierarchy, props, state management patterns, styling system, and data flow for the TradeBotX dashboard.
+---
+
+## Stack
+
+**React 19 + TypeScript + Vite** at `frontend/src/`  
+**Styling:** Custom CSS dark theme (`index.css`, 2600+ lines) — no Tailwind  
+**State:** Local `useState` in `App.tsx` (no Redux/Zustand)  
+**Real-time:** SSE for analysis progress, REST polling every 5 seconds for dashboard
+
+## Component Hierarchy
+
+```
+App.tsx (Root — state + routing + API calls)
+├── TopNav.tsx          (navigation bar)
+└── Routed View (one of):
+    ├── DashboardView.tsx
+    ├── ScreenerView.tsx
+    ├── AnalysisView.tsx
+    ├── WatchlistPanel.tsx
+    ├── ResultsView.tsx
+    ├── PredictionsView.tsx
+    └── PaperTradingView.tsx
+```
+
+## Components
+
+### App.tsx — Root
+
+Owns all shared state, view routing, and API communication. Children receive state as props and call callbacks to trigger actions.
+
+```typescript
+const [view, setView] = useState<View>('dashboard')
+const [indices, setIndices] = useState<string[]>([])
+const [selectedIndex, setSelectedIndex] = useState('NIFTY 50')
+const [screenData, setScreenData] = useState<ScreenResult | null>(null)
+const [selectedStock, setSelectedStock] = useState<Stock | null>(null)
+const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null)
+const [completedAgents, setCompletedAgents] = useState<Set<string>>(new Set())
+```
+
+**Key flows:**
+```typescript
+// Stream 13-agent analysis via SSE
+handleAnalyse = (stock: Stock) => {
+  const es = new EventSource(`${API}/api/analyze/stream?ticker=${stock.ticker}&date=${date}`)
+  es.onmessage = (event) => {
+    const data = JSON.parse(event.data)
+    if (data.type === 'progress') setCompletedAgents(prev => new Set([...prev, data.agent]))
+    if (data.type === 'result') { setAnalysisResult(data); es.close() }
+  }
+}
+```
+
+### DashboardView.tsx — Real-Time Monitoring
+
+Polls 5 endpoints every 5 seconds: `/api/scanner/status`, `/api/paper/performance`, `/api/paper/portfolio`, `/api/market/status`, `/api/upstox/status`.
+
+Contains four sub-components:
+- **MarketCountdown** — 🟢 OPEN / ⚫ CLOSED + countdown timer (updates every 1 sec)
+- **DailyLossLimitBar** — progress bar 0–100% (green → yellow → red), shows -₹X / -₹2000
+- **PieChart** — SVG win/loss pie chart with center trade count and win rate legend
+- **ActivePositionsTable** — symbol, qty, entry, SL%, TP%, time held
+
+### ScreenerView.tsx — Stock Scanner
+
+Props: `indices`, `selectedIndex`, `onIndexChange`, `onScan`, `screenData`, `showFlaggedOnly`, `onToggleFlagged`, `onAnalyse`
+
+Renders a control bar (index dropdown, Scan button, flagged-only toggle) and a stock table with columns: Symbol, LTP, Change, RSI, Volume, Flag Badge, Analyse button.
+
+Flagging logic: RSI < 30 or > 70, volume > 2× average, 52-week high/low proximity.
+
+### AnalysisView.tsx — LLM Pipeline Progress
+
+Props: `stock`, `isLoading`, `completedAgents`, `result`, `openReports`, `onToggleReport`, `onBack`
+
+Layout:
+```
+← Back   INFY.NS ₹1,842
+────────────────────────
+AgentPipeline (progress stepper)
+  ✓ Market Analyst      ← green checkmark
+  ◐ Fundamentals...     ← blue pulse (in progress)
+  ○ Bull Researcher     ← gray (pending)
+────────────────────────
+Final Decision: BUY ⭐⭐⭐⭐⭐
+────────────────────────
+Reports accordion (click to expand each agent)
+```
+
+### PaperTradingView.tsx — Virtual Trading
+
+Five sections:
+1. **Portfolio Summary** — capital, total P&L, today's P&L, win rate
+2. **Open Positions Table** — symbol, qty, entry, SL, target, entry time, unrealised P&L
+3. **Trade History** — exit time, symbol, entry/exit, qty, P&L, reason
+4. **Entry/Exit Modal** — manual buy/sell form with validation
+5. **Daily Reset Info** — last reset time, next reset, daily loss limit
+
+### PredictionsView.tsx — Accuracy Analytics
+
+Displays:
+- Stats summary: total predictions, settled/pending, overall win rate
+- Accuracy table by rating (1/5–5/5): count, wins, win%, avg return
+- Filterable predictions table: ticker, date, decision, rating, price, return, status
+- Filters: by rating, ticker, outcome, date range
+- CSV/PDF export
+
+### WatchlistPanel.tsx — Saved Stocks
+
+Tickers stored in `localStorage`. Features: add by text input, remove with ×, live prices updated every 5 sec (green up, red down), Analyse button per row.
+
+### ResultsView.tsx — Historical Analyses
+
+Table: ticker, date, decision, rating, expandable chevron. Expanded row shows all 13 agent reports, current price, and return %.
+
+## Styling System
+
+```css
+:root {
+  --bg:           #09090B;   /* page background */
+  --surface:      #18181B;   /* card background */
+  --surface-2:    #27272A;   /* hover */
+  --text:         #FAFAFA;
+  --text-muted:   #A1A1AA;
+  --blue:         #2563EB;
+  --green:        #22C55E;
+  --red:          #EF4444;
+  --amber:        #F59E0B;
+  --font-mono:    'Space Mono', monospace;
+  --font-body:    'DM Sans', -apple-system, sans-serif;
+}
+```
+
+Reusable classes: `.dashboard-card`, `.dashboard-grid`, `.status-badge`, `.table-wrap`, `.error-box`
+
+## State Management Rules
+
+1. State needed by multiple views → keep in `App.tsx`
+2. State used by one component only → keep local (`useState`)
+3. Never mutate state directly — always create new objects
+4. SSE for streaming (Analysis view), REST polling for periodic updates (Dashboard)
+
+```typescript
+// ❌ Wrong — mutates existing Set
+completedAgents.add(agent)
+setCompletedAgents(completedAgents)
+
+// ✅ Correct — creates new Set
+setCompletedAgents(prev => new Set([...prev, agent]))
+```
+
+## Common Patterns
+
+```typescript
+// Cleanup SSE on unmount
+useEffect(() => {
+  eventSourceRef.current?.close()
+  const es = new EventSource(url)
+  eventSourceRef.current = es
+  return () => es.close()
+}, [dependencies])
+
+// Cleanup polling interval
+useEffect(() => {
+  const interval = setInterval(fetchData, 5000)
+  return () => clearInterval(interval)
+}, [])
+```
+
+## Troubleshooting
+
+| Issue | Fix |
+|---|---|
+| Component not rendering | Check `view` state in App.tsx conditional |
+| Data not updating | Verify API endpoint in Network tab (F12) |
+| SSE stuck | Check `eventSourceRef.current?.close()` in cleanup |
+| Performance lag | Reduce polling frequency, add `React.memo` |

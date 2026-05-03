@@ -1,64 +1,140 @@
 ---
 title: TradeBotX Overview
-description: AI-powered Indian stock trading platform combining a 13-agent LLM pipeline with live Upstox market data and automated paper trading.
+description: AI-powered Indian stock trading platform combining a 13-agent LLM pipeline with real-time Upstox market data, automated technical signals, and paper trading.
 ---
 
 ## What Is TradeBotX?
 
-TradeBotX is a full-stack trading intelligence platform built for the **Indian stock market (NSE)**. It combines a 13-agent AI pipeline powered by LLMs with real-time market data from Upstox, automated technical analysis, and a simulated paper trading engine — all accessible through a modern React dashboard.
+TradeBotX is a full-stack trading intelligence platform built for the **Indian stock market (NSE)**. It combines a 13-agent AI pipeline powered by LLMs with real-time market data from Upstox, 9 deterministic technical indicators, and a fully automated paper trading engine — all accessible through a modern React dashboard.
 
-Think of it as your personal AI trading desk: it screens stocks, debates bull vs. bear cases using multiple AI agents, computes technical signals, and can auto-trade in paper mode — without risking real money.
+Think of it as your personal AI trading desk: it screens stocks, debates bull vs. bear cases using multiple AI agents, computes technical signals every 5 minutes, and auto-trades in paper mode with proper risk management — without risking real money.
 
 <Callout kind="info">
-  TradeBotX is designed for **paper trading only**. No real orders are placed on any exchange. It is a research and strategy-testing tool.
+  TradeBotX currently operates in **paper trading mode only**. No real orders are placed on any exchange. Phase 14 of the roadmap introduces live Upstox order execution once a verified 3-month track record is established.
 </Callout>
+
+## System Architecture
+
+TradeBotX is built as five interconnected layers:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  DASHBOARD (React 19 + TypeScript at localhost:5173)    │
+│  Views: Dashboard, Screener, Analysis, Paper Trading,   │
+│         Watchlist, Predictions, Results                 │
+└──────────────────┬──────────────────────────────────────┘
+                   │
+┌──────────────────▼──────────────────────────────────────┐
+│  API SERVER (FastAPI at localhost:8000)                  │
+│  ├─ /api/screen           screener + flagged stocks     │
+│  ├─ /api/analyze/stream   13-agent SSE pipeline         │
+│  ├─ /api/paper/*          paper trading endpoints       │
+│  ├─ /api/scanner/*        scanner control + status      │
+│  └─ /api/predictions      accuracy tracking             │
+└──────────────────┬──────────────────────────────────────┘
+                   │
+        ┌──────────┴────────────┐
+        │                       │
+┌───────▼────────┐    ┌────────▼──────────┐
+│ FAST LAYER     │    │ LLM PIPELINE      │
+│ (Real-time)    │    │ (Deep research)   │
+│ • RSI, MACD    │    │ • 13 agents       │
+│ • EMA, VWAP    │    │ • News sentiment  │
+│ • Bollinger    │    │ • Fundamentals    │
+│ • Stochastic   │    │ • Risk debate     │
+│ • ATR, Volume  │    │ (2–5 min/stock)   │
+│ (< 1 sec)      │    │                   │
+└───────┬────────┘    └────────┬──────────┘
+        └──────────┬───────────┘
+                   │
+        ┌──────────▼──────────────┐
+        │  PAPER TRADER + SCANNER │
+        │  Virtual positions      │
+        │  Risk checks (2% DL)    │
+        │  SL/TP/trailing stops   │
+        │  State in SQLite        │
+        │  Auto-scan every 5 min  │
+        └─────────────────────────┘
+```
 
 ## Why TradeBotX?
 
 | Problem | TradeBotX Solution |
 |---|---|
-| Manual stock research takes hours | 13 AI agents analyse a stock in ~2 minutes |
-| Emotional trading decisions | Data-driven composite signal scores (0.0–1.0) |
-| Missing market moves | Auto-scanner monitors NIFTY 50 every 5 minutes |
-| No way to test strategies | Paper trading with full risk management |
+| Manual stock research takes hours | 13 AI agents analyse a stock in ~2–5 minutes |
+| Emotional trading decisions | Deterministic composite signal scores (0.0–1.0) |
+| Missing intraday moves | Auto-scanner monitors NIFTY 50 every 5 minutes |
+| No way to test strategies | Paper trading with full risk management and real prices |
 | Expensive trading terminals | Free, self-hosted, open-source |
-| Information overload | Curated analysis: macro, fundamentals, sentiment, technicals |
+| Slow intraday signals from LLM | Fast technical layer — 50 stocks scored in under 1 second |
 
 ## Key Capabilities
 
 <Columns cols={2}>
   <Card title="13-Agent AI Pipeline" icon="cpu" href="/components/callouts">
-    LangGraph multi-agent system producing BUY / SELL / HOLD decisions in ~2 minutes per stock.
+    LangGraph multi-agent system: 5 analysts, bull/bear debate, trader proposal, 3 risk analysts, portfolio manager. Produces BUY / SELL / HOLD decisions in 2–5 minutes per stock.
   </Card>
-  <Card title="Live Market Data" icon="trending-up" href="/authentication">
-    Real-time LTP, OHLCV candles, and WebSocket tick feed via Upstox V2/V3 API.
+  <Card title="Fast Technical Signal Layer" icon="zap" href="/components/cards">
+    9 deterministic indicators (RSI, MACD, EMA, VWAP, Bollinger, Stochastic, ATR, Volume Surge, Momentum) computed in under 1 second. No LLM involved.
   </Card>
-  <Card title="Technical Indicator Engine" icon="bar-chart-2" href="/components/cards">
-    RSI, MACD, VWAP, Bollinger Bands, EMA, Volume Surge — computed locally with no external TA library.
+  <Card title="Auto-Scanner Bot" icon="scan" href="/components/code">
+    Polls NIFTY 50 every 5 minutes during market hours. Auto-enters trades when score > 0.65, auto-exits on SL/TP/trailing stop or at 15:20 IST.
   </Card>
   <Card title="Paper Trading Engine" icon="dollar-sign" href="/components/images">
-    Simulated trades with stop-loss, take-profit, trailing stops, and time-based exits.
+    Virtual portfolio with real Upstox prices. Enforces 2% daily loss limit, 5% max position size, mandatory stop-loss, max 3 concurrent positions.
   </Card>
-  <Card title="Auto-Scanner" icon="scan" href="/components/code">
-    Scheduled bot that screens NIFTY 50 every 5 minutes and auto-enters/exits paper positions.
+  <Card title="Live Market Data" icon="trending-up" href="/authentication">
+    Real-time LTP, OHLCV candles, and WebSocket tick feed via Upstox V2/V3 API. Batch LTP for 50 stocks in a single API call.
   </Card>
   <Card title="Prediction Tracker" icon="check-circle" href="/components/tabs">
-    SQLite-backed accuracy tracking for every AI decision made.
+    SQLite-backed accuracy tracking for every AI decision. Win rates by confidence rating, Sharpe ratio analytics, and outcome history.
   </Card>
 </Columns>
 
 ## The React Dashboard
 
-The frontend has six tabs, each serving a distinct purpose:
+The frontend (`localhost:5173`) has seven views:
 
-| Tab | Purpose |
+| View | Purpose |
 |---|---|
-| **Screener** | NSE index stock screener with flagged stocks |
-| **Analysis** | Live agent pipeline progress and final results |
-| **Paper Trading** | Live prices, signal table, portfolio, trade history |
-| **Watchlist** | Custom ticker list and batch analysis launcher |
-| **Predictions** | AI decision accuracy tracking dashboard |
-| **Results** | Historical analysis results browser |
+| **Dashboard** | Real-time market status, daily loss bar, win/loss pie chart, active positions table |
+| **Screener** | NSE index stock scanner — flags RSI extremes, volume spikes, price action |
+| **Analysis** | Live 13-agent pipeline progress (SSE) and final decision with agent reports |
+| **Paper Trading** | Live positions, entry/exit history, manual buy/sell, P&L tracking |
+| **Watchlist** | Custom ticker list, live prices, quick analysis launcher |
+| **Predictions** | AI decision accuracy by rating, win rate trends, per-stock statistics |
+| **Results** | Historical analysis browser with expandable agent reports |
+
+## LLM Pipeline Phases
+
+```
+Phase 1 — Analyst Team (run in parallel)
+  Market Analyst, Social Media Analyst, News Analyst,
+  Fundamentals Analyst, India Macro Analyst
+
+Phase 2 — Researcher Team (debate rounds)
+  Bull Researcher ↔ Bear Researcher → Research Manager
+
+Phase 3 — Trader
+  Composes all analyst reports into an investment plan
+
+Phase 4 — Risk Management Team (debate rounds)
+  Aggressive / Conservative / Neutral Debaters → Portfolio Manager
+```
+
+## Project Status (May 2026)
+
+| Phase | Description | Status |
+|---|---|---|
+| Phase 6 | Paper trading engine | ✅ Done |
+| Phase 7 | Real-time Upstox data layer | ✅ Done |
+| Phase 8 | Fast signal layer (9 indicators) | ✅ Done |
+| Phase 9 | Risk management engine | ✅ Done |
+| Phase 10 | Auto paper trading bot | 🟡 Testing (Phase 0) |
+| Phase 11 | Advanced analytics dashboard | ⏳ Planned |
+| Phase 12 | Cloud deployment (24/7 VPS) | ⏳ Planned |
+| Phase 13 | 3-month paper trading period | ⏳ Planned |
+| Phase 14 | Go live with real capital (₹10,000) | ⏳ Planned |
 
 ## Where to Go Next
 
@@ -67,12 +143,18 @@ The frontend has six tabs, each serving a distinct purpose:
     Get TradeBotX running locally in under 10 minutes.
   </Card>
   <Card title="System Architecture" href="/concepts" icon="git-branch" horizontal>
-    Understand how all components connect.
+    Understand how all components connect and the two-tier config system.
   </Card>
   <Card title="AI Agent Pipeline" href="/components/callouts" icon="cpu" horizontal>
-    Deep dive into the 13 agents and their roles.
+    Deep dive into the 13 agents, their roles, and phase structure.
+  </Card>
+  <Card title="Technical Indicators" href="/components/cards" icon="bar-chart-2" horizontal>
+    How 9 indicators are scored and combined into a composite signal.
+  </Card>
+  <Card title="Auto-Scanner & Scheduler" href="/components/code" icon="clock" horizontal>
+    How the background jobs automate market monitoring and trading.
   </Card>
   <Card title="Upstox Integration" href="/authentication" icon="link" horizontal>
-    OAuth flow, API endpoints, and instrument key mapping.
+    OAuth flow, token lifecycle, and API usage.
   </Card>
 </Columns>

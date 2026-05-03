@@ -1,0 +1,420 @@
+---
+title: Testing Guide
+description: pytest and unittest guide for TradeBotX — unit, integration, and e2e tests, mocking, fixtures, async testing, and CI/CD setup.
+---
+
+## Quick Start
+
+```bash
+# Run all tests
+pytest
+
+# Run with verbose output
+pytest -v
+
+# Run specific file/class/method
+pytest tests/test_ticker_symbol_handling.py
+pytest tests/test_model_validation.py::TestModelValidation
+pytest tests/test_ticker_symbol_handling.py::TickerSymbolHandlingTests::test_normalize_ticker_symbol_preserves_exchange_suffix
+
+# Run by pattern
+pytest -k "ticker"
+
+# Run with coverage
+pytest --cov=tradingagents --cov=paper_trader --cov=signal_scanner --cov-report=html
+```
+
+## Test Structure
+
+```
+TradingAgents/
+├── tests/
+│   ├── test_ticker_symbol_handling.py    # Symbol normalization
+│   ├── test_model_validation.py          # LLM response parsing
+│   ├── test_google_api_key.py            # Configuration validation
+│   └── __init__.py
+├── test.py                               # Standalone integration test
+├── test_feedback_loop.py                 # LLM reflection testing
+└── test_phase1_ready.py                  # Phase 0 readiness check
+```
+
+## Existing Tests
+
+| File | Tests |
+|---|---|
+| `tests/test_ticker_symbol_handling.py` | Symbol normalization (whitespace, case, exchange suffix) |
+| `tests/test_model_validation.py` | LLM response parsing and validation |
+| `tests/test_google_api_key.py` | Configuration validation for LLM providers |
+
+## Test Templates
+
+<Tabs>
+  <Tab title="unittest style" icon="check-square">
+    ```python
+    import unittest
+    from my_module import my_function
+
+    class TestMyFeature(unittest.TestCase):
+
+        def setUp(self):
+            self.sample_data = {"ticker": "INFY.NS", "price": 1850}
+
+        def tearDown(self):
+            pass  # cleanup connections, temp files
+
+        def test_happy_path(self):
+            result = my_function(self.sample_data)
+            self.assertEqual(result["status"], "success")
+
+        def test_error_handling(self):
+            with self.assertRaises(ValueError):
+                my_function({"ticker": None, "price": 1850})
+
+        def test_edge_case(self):
+            result = my_function({"ticker": "X", "price": 0})
+            self.assertIsNotNone(result)
+
+    if __name__ == "__main__":
+        unittest.main()
+    ```
+  </Tab>
+  <Tab title="pytest style" icon="zap">
+    ```python
+    import pytest
+    from my_module import my_function
+
+    class TestMyFeature:
+
+        @pytest.fixture(autouse=True)
+        def setup(self):
+            self.sample_data = {"ticker": "INFY.NS", "price": 1850}
+            yield  # cleanup after
+
+        def test_happy_path(self):
+            result = my_function(self.sample_data)
+            assert result["status"] == "success"
+
+        def test_error_handling(self):
+            with pytest.raises(ValueError):
+                my_function({"ticker": None, "price": 1850})
+
+        @pytest.mark.parametrize("price", [0, 100, 10000])
+        def test_multiple_prices(self, price):
+            result = my_function({"ticker": "INFY.NS", "price": price})
+            assert result is not None
+    ```
+  </Tab>
+</Tabs>
+
+## Test Categories
+
+<Tabs>
+  <Tab title="Unit Tests" icon="box">
+    Test individual functions in isolation — no external dependencies. Target: 10–100ms per test.
+
+    ```python
+    # tests/test_technical_indicators.py
+    from technical import calculate_rsi
+
+    class TestTechnicalIndicators(unittest.TestCase):
+
+        def test_rsi_calculation(self):
+            prices = [100, 102, 101, 103, 105, 104, 106, 108, 107, 109]
+            rsi = calculate_rsi(prices)
+            self.assertGreater(rsi, 0)
+            self.assertLess(rsi, 100)
+
+        def test_rsi_empty_data(self):
+            with self.assertRaises(ValueError):
+                calculate_rsi([])
+
+        def test_rsi_single_value(self):
+            rsi = calculate_rsi([100])
+            self.assertEqual(rsi, 50)  # neutral
+    ```
+  </Tab>
+  <Tab title="Integration Tests" icon="link">
+    Test multiple components together using a test database. Target: 100ms–10s per test.
+
+    ```python
+    # tests/test_paper_trader_integration.py
+    import tempfile
+    from paper_trader import PaperTrader
+
+    class TestPaperTraderIntegration(unittest.TestCase):
+
+        def setUp(self):
+            self.db_file = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+            self.pt = PaperTrader(initial_capital=100_000)
+
+        def tearDown(self):
+            import os; os.unlink(self.db_file.name)
+
+        def test_enter_and_exit_trade(self):
+            entry_id = self.pt.enter_trade(
+                symbol="INFY.NS", quantity=10,
+                entry_price=1850, stop_loss=1750, target_price=1950
+            )
+            self.assertIsNotNone(entry_id)
+            positions = self.pt.get_open_positions()
+            self.assertEqual(len(positions), 1)
+
+            self.pt.exit_trade(entry_id, exit_price=1900, reason="MANUAL")
+            positions = self.pt.get_open_positions()
+            self.assertEqual(len(positions), 0)
+
+        def test_daily_loss_limit_circuit_breaker(self):
+            # Make losing trades until daily_loss > 2%
+            for i in range(10):
+                try:
+                    self.pt.enter_trade("INFY", 1, 1000, 990, 1010)
+                    self.pt.exit_trade(..., exit_price=990, reason="LOSS")
+                except Exception as e:
+                    if "daily loss limit" in str(e):
+                        break
+            with self.assertRaises(RuntimeError) as ctx:
+                self.pt.enter_trade("TCS", 1, 3000, 2900, 3100)
+            self.assertIn("daily loss limit", str(ctx.exception))
+    ```
+  </Tab>
+  <Tab title="End-to-End Tests" icon="play">
+    Test the full pipeline: API → LLM → paper trader → database. Target: 10s–60s per test.
+
+    ```python
+    # tests/test_e2e_analysis_pipeline.py
+    from fastapi.testclient import TestClient
+    from api_server import app
+
+    class TestE2EAnalysisPipeline(unittest.TestCase):
+
+        @classmethod
+        def setUpClass(cls):
+            cls.client = TestClient(app)
+
+        def test_full_analysis_request(self):
+            response = self.client.post(
+                "/api/analyze/stream",
+                json={"ticker": "INFY.NS", "trade_date": "2026-05-03"}
+            )
+            self.assertEqual(response.status_code, 200)
+
+            lines = response.text.strip().split("\n")
+            events = [l for l in lines if l.startswith("data:")]
+            self.assertGreater(len(events), 5)
+
+            import json
+            final = json.loads(events[-1].split("data: ")[1])
+            self.assertIn("decision", final)
+            self.assertIn("confidence", final)
+    ```
+  </Tab>
+</Tabs>
+
+## Async Testing
+
+```python
+import asyncio, pytest
+from signal_scanner import run_signal_scan
+
+# unittest style
+class TestAsyncFunctions(unittest.TestCase):
+    def test_signal_scan(self):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(
+                run_signal_scan(mock_client, mock_trader)
+            )
+            self.assertIn("scans", result)
+        finally:
+            loop.close()
+
+# pytest style (requires pip install pytest-asyncio)
+@pytest.mark.asyncio
+async def test_signal_scan_pytest():
+    result = await run_signal_scan(mock_client, mock_trader)
+    assert "scans" in result
+```
+
+## Mocking External Services
+
+<Tabs>
+  <Tab title="Mock Upstox API" icon="cloud-off">
+    ```python
+    from unittest.mock import Mock, patch
+
+    class TestUpstoxClient(unittest.TestCase):
+
+        @patch("upstox_client.httpx.AsyncClient")
+        async def test_get_batch_ltp(self, mock_http):
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {
+                "data": {
+                    "NSE_EQ:INFY": {"last_price": 1850},
+                    "NSE_EQ:TCS":  {"last_price": 3400}
+                }
+            }
+            mock_http.get.return_value = mock_response
+
+            client = UpstoxClient(self.config)
+            ltps = await client.get_batch_ltp(["NSE_EQ|INE009A01021"])
+            self.assertEqual(ltps["NSE_EQ:INFY"], 1850)
+    ```
+  </Tab>
+  <Tab title="Mock LLM Pipeline" icon="cpu">
+    ```python
+    from unittest.mock import patch, MagicMock
+    from tradingagents.graph.trading_graph import TradingAgentsGraph
+
+    class TestLLMPipeline(unittest.TestCase):
+
+        @patch("tradingagents.llm_clients.factory.create_llm_client")
+        def test_pipeline_with_mock_llm(self, mock_factory):
+            mock_llm = MagicMock()
+            mock_llm.invoke.return_value = {
+                "content": "BUY|INFY|Strong technical setup"
+            }
+            mock_factory.return_value.get_llm.return_value = mock_llm
+
+            graph = TradingAgentsGraph(debug=True)
+            result = graph.propagate("INFY.NS", "2026-05-03")
+            self.assertIn("final_trade_decision", result)
+    ```
+  </Tab>
+</Tabs>
+
+## Fixtures
+
+```python
+# tests/fixtures.py
+import pytest
+import pandas as pd
+
+@pytest.fixture
+def sample_ohlc_data():
+    dates = pd.date_range("2026-01-01", periods=100, freq="D")
+    return pd.DataFrame({
+        "timestamp": dates,
+        "open":   [1800 + i * 0.5 for i in range(100)],
+        "high":   [1820 + i * 0.5 for i in range(100)],
+        "low":    [1780 + i * 0.5 for i in range(100)],
+        "close":  [1810 + i * 0.5 for i in range(100)],
+        "volume": [1000000] * 100,
+        "oi":     [0] * 100,
+    })
+
+@pytest.fixture
+def sample_paper_trader():
+    from paper_trader import PaperTrader
+    return PaperTrader(initial_capital=100_000)
+
+# Usage:
+def test_technical_analysis(sample_ohlc_data):
+    from technical import calculate_rsi
+    rsi = calculate_rsi(sample_ohlc_data["close"])
+    assert 0 < rsi < 100
+```
+
+### Test Database Fixture
+
+```python
+# tests/conftest.py
+import pytest, sqlite3, tempfile
+from pathlib import Path
+
+@pytest.fixture
+def test_db():
+    fd, path = tempfile.mkstemp(suffix=".db")
+    db_path = Path(path)
+    conn = sqlite3.connect(db_path)
+    conn.executescript("""
+        CREATE TABLE paper_trades (
+            id INTEGER PRIMARY KEY, symbol TEXT, direction TEXT,
+            quantity INTEGER, entry_price REAL, exit_price REAL,
+            entry_time TEXT, exit_time TEXT, pnl REAL, pnl_pct REAL,
+            stop_loss REAL, target_price REAL, exit_reason TEXT, strategy TEXT
+        );
+        CREATE TABLE paper_portfolio (
+            id INTEGER PRIMARY KEY, capital REAL, initial_capital REAL,
+            total_pnl REAL, total_pnl_pct REAL, daily_pnl REAL,
+            daily_trades INTEGER, daily_wins INTEGER, daily_losses INTEGER,
+            total_trades INTEGER, total_wins INTEGER, total_win_rate REAL,
+            daily_loss_limit_active INTEGER, last_updated TEXT
+        );
+    """)
+    conn.commit(); conn.close()
+    yield db_path
+    import os; os.unlink(db_path)
+```
+
+## CI/CD Integration
+
+```yaml
+# .github/workflows/tests.yml
+name: Tests
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e . pytest pytest-cov pytest-asyncio
+      - run: pytest --cov=tradingagents --cov=paper_trader --cov-report=xml
+      - uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage.xml
+```
+
+## Coverage Goals
+
+| Target | Status |
+|---|---|
+| Core modules (`paper_trader`, `signal_scanner`) | 🟡 70% — Phase 1 target |
+| API endpoints (`api_server.py`) | 🟡 50% — Phase 1 target |
+| LLM agents (`tradingagents/`) | 🟠 30% — hard to test (external LLM) |
+| Total codebase | 🟡 40% now → 60% by June 2026 |
+
+## Best Practices
+
+**Do:**
+- ✅ Test happy path, error cases, and edge cases (boundaries: 0, negative, very large)
+- ✅ Mock all external services (Upstox API, LLM providers)
+- ✅ Use fixtures for reusable test data and setup
+- ✅ Test concurrency — run parallel threads to verify thread safety
+- ✅ Verify database state after operations
+- ✅ Use `setUp`/`tearDown` to clean up resources
+
+**Don't:**
+- ❌ Test implementation details — test behavior, not internal code
+- ❌ Use random test data — use deterministic fixtures
+- ❌ Run tests against real APIs — use mocks
+- ❌ Use hardcoded file paths — use `tempfile`
+- ❌ Leave tests failing — fix immediately, don't skip
+
+## Debugging Failed Tests
+
+```bash
+# Verbose output
+pytest -vvv tests/test_my_feature.py::TestMyClass::test_method
+
+# Drop into debugger on failure
+pytest --pdb tests/test_my_feature.py
+
+# List all tests without running
+pytest --collect-only
+```
+
+```python
+def test_something(self):
+    result = my_function()
+    import pdb; pdb.set_trace()  # debugger stops here
+    self.assertEqual(result, expected)
+```

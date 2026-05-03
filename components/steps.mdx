@@ -1,6 +1,6 @@
 ---
 title: API Endpoints
-description: Complete reference for all TradeBotX REST endpoints — market data, AI analysis, paper trading, auto-scanner, watchlist, and authentication.
+description: Complete REST API reference for TradeBotX — screener, LLM analysis, paper trading, auto-scanner, predictions, market status, and authentication.
 ---
 
 ## Base URL
@@ -9,109 +9,458 @@ description: Complete reference for all TradeBotX REST endpoints — market data
 http://localhost:8000
 ```
 
-Interactive docs are available at **http://localhost:8000/docs** (Swagger UI) and **http://localhost:8000/redoc**.
+Interactive Swagger UI: **http://localhost:8000/docs**  
+ReDoc: **http://localhost:8000/redoc**  
+Updated: May 3, 2026
 
 ---
 
-## Market Data
+## Screener Endpoints
 
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/upstox/ltp/batch?index=NIFTY50` | Live prices for all index stocks in one call |
-| `GET` | `/api/upstox/ltp/{symbol}` | Live price for a single stock |
-| `GET` | `/api/upstox/quote/{symbol}` | Full OHLCV + market depth |
-| `GET` | `/api/upstox/candles/{symbol}` | Historical daily candles |
-| `GET` | `/api/upstox/signals/{symbol}` | Composite technical signal score |
-| `GET` | `/api/upstox/movers` | Top movers by % change |
-| `GET` | `/api/upstox/instruments` | All supported symbol → ISIN mappings |
+### GET /api/indices
 
-### Signal Response
+List all available NSE indices for screening.
 
+**Response:**
 ```json
-GET /api/upstox/signals/RELIANCE
-
 {
-  "symbol": "RELIANCE",
-  "score": 0.71,
-  "signal": "BUY",
-  "indicators": {
-    "rsi": 42.3,
-    "macd_histogram": 8.5,
-    "vwap": 2930.0,
-    "price": 2945.5,
-    "ema20": 2910.0,
-    "ema50": 2870.0,
-    "volume_surge": true,
-    "atr": 45.2
-  },
-  "trend": "uptrend"
+  "indices": ["NIFTY 50", "NIFTY BANK", "NIFTY IT", "NIFTY PHARMA", "NIFTY AUTO"]
+}
+```
+
+### GET /api/screen
+
+Scan an index and return flagged stocks (technical extremes, volume spikes).
+
+**Query Parameters:**
+- `index` (string, required) — Index to scan (e.g., "NIFTY 50")
+
+**Response:**
+```json
+{
+  "index_name": "NIFTY 50",
+  "last_updated": "2026-05-03T10:15:30",
+  "stocks": [
+    {
+      "symbol": "INFY.NS",
+      "name": "Infosys Limited",
+      "ltp": 1842.50,
+      "change": 25.50,
+      "pct_change": 1.40,
+      "open": 1820.00,
+      "high": 1850.00,
+      "low": 1815.00,
+      "volume": 1250000,
+      "year_high": 1950.00,
+      "year_low": 1200.00
+    }
+  ],
+  "flagged": [],
+  "flagged_count": 5,
+  "total_count": 50
 }
 ```
 
 ---
 
-## AI Analysis
+## Analysis Endpoints (LLM Pipeline)
 
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/analyze/stream` | SSE stream — live 13-agent pipeline |
-| `POST` | `/api/analyze/batch` | Batch analyse multiple tickers |
-| `GET` | `/api/screen` | NSE index screener with flagged stocks |
-| `GET` | `/api/indices` | Available NSE indices |
-| `GET` | `/api/results` | Historical analysis results |
+### GET /api/analyze/stream
 
-### SSE Stream Events
+Stream live 13-agent analysis pipeline with progress updates via Server-Sent Events (SSE).
 
-```bash
-curl -N "http://localhost:8000/api/analyze/stream?ticker=RELIANCE"
+**Query Parameters:**
+- `ticker` (string, required) — Stock ticker, e.g. `"INFY.NS"`
+- `date` (string, required) — Analysis date (YYYY-MM-DD)
 
-event: progress
-data: {"agent": "market_analyst", "status": "complete", "pct": 15}
+**SSE Event — Progress:**
+```json
+{
+  "type": "progress",
+  "agent": "Market Analyst",
+  "timestamp": "2026-05-03T10:15:30"
+}
+```
 
-event: result
-data: {"decision": "BUY", "rating": 0.78, "reports": {...}}
+**SSE Event — Final Result:**
+```json
+{
+  "type": "result",
+  "decision": "BUY",
+  "rating": "5/5",
+  "reports": {
+    "Market Analyst": "Market sentiment is bullish...",
+    "News Analyst": "Recent news shows strong growth...",
+    "Fundamentals Analyst": "P/E ratio is attractive...",
+    "Bull Researcher": "Bull case: strong tech demand...",
+    "Bear Researcher": "Bear case: valuation concerns...",
+    "Research Manager": "Consensus: BUY on dips...",
+    "Trader": "Entry plan: buy on support...",
+    "Portfolio Manager": "FINAL: BUY - risk/reward favorable"
+  }
+}
+```
+
+**SSE Event — Error:**
+```json
+{
+  "type": "error",
+  "message": "Ticker not found or API error"
+}
+```
+
+**JavaScript/TypeScript Usage:**
+```typescript
+const eventSource = new EventSource(
+  'http://localhost:8000/api/analyze/stream?ticker=INFY.NS&date=2026-05-03'
+);
+eventSource.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  if (data.type === 'progress') {
+    console.log(`${data.agent} completed`);
+  } else if (data.type === 'result') {
+    console.log(`Decision: ${data.decision}`);
+    eventSource.close();
+  }
+};
 ```
 
 ---
 
-## Paper Trading
+## Paper Trading Endpoints
 
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/paper/portfolio` | Open positions, capital, daily and total P&L |
-| `POST` | `/api/paper/buy` | Enter a paper trade |
-| `POST` | `/api/paper/sell` | Exit a paper trade |
-| `GET` | `/api/paper/history` | All closed trades |
-| `GET` | `/api/paper/performance` | Win rate and P&L statistics |
+### GET /api/paper/portfolio
+
+Get current paper trading portfolio state including open positions.
+
+**Response:**
+```json
+{
+  "capital": 97500.00,
+  "initial_capital": 100000,
+  "total_pnl": 2500.00,
+  "total_pnl_pct": 2.50,
+  "daily_pnl": 150.00,
+  "open_positions": [
+    {
+      "symbol": "INFY.NS",
+      "quantity": 10,
+      "entry_price": 1842.00,
+      "entry_time": "2026-05-03T09:47:00",
+      "stop_loss": 1814.00,
+      "target_price": 1920.00,
+      "trailing_stop": 1825.00,
+      "strategy": "technical_signal"
+    }
+  ],
+  "position_count": 1,
+  "daily_trades": 3,
+  "daily_wins": 2,
+  "daily_losses": 1,
+  "total_trades": 47,
+  "total_wins": 29,
+  "total_win_rate": 0.617,
+  "daily_loss_limit_active": false
+}
+```
+
+### GET /api/paper/performance
+
+Get detailed performance statistics.
+
+**Response:**
+```json
+{
+  "capital": 97500.00,
+  "initial_capital": 100000,
+  "total_pnl": 2500.00,
+  "total_pnl_pct": 2.50,
+  "daily_pnl": 150.00,
+  "win_rate": 0.617,
+  "total_trades": 47,
+  "daily_trades": 3,
+  "avg_win_pct": 2.15,
+  "avg_loss_pct": -1.50,
+  "sharpe_ratio": 1.24,
+  "max_drawdown_pct": -8.5
+}
+```
+
+### POST /api/paper/buy
+
+Manually enter a long position.
+
+**Request Body:**
+```json
+{
+  "symbol": "INFY.NS",
+  "quantity": 10,
+  "price": 1842.00,
+  "stop_loss": 1814.00,
+  "target_price": 1920.00,
+  "strategy": "manual"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "position_id": "INFY.NS_20260503_094700",
+  "entry_price": 1842.00,
+  "stop_loss": 1814.00,
+  "target": 1920.00,
+  "capital_remaining": 97500.00
+}
+```
+
+### POST /api/paper/sell
+
+Manually exit a position.
+
+**Request Body:**
+```json
+{
+  "symbol": "INFY.NS",
+  "quantity": 10,
+  "exit_price": 1880.00
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "pnl": 380.00,
+  "pnl_pct": 2.06,
+  "capital_returned": 18800.00,
+  "total_capital": 98300.00
+}
+```
+
+### GET /api/paper/history
+
+Get recent trade history.
+
+**Query Parameters:**
+- `limit` (integer, optional) — Number of trades to return (default: 50)
+
+**Response:**
+```json
+{
+  "trades": [
+    {
+      "symbol": "INFY.NS",
+      "entry_price": 1842.00,
+      "exit_price": 1880.00,
+      "quantity": 10,
+      "entry_time": "2026-05-03T09:47:00",
+      "exit_time": "2026-05-03T11:22:00",
+      "pnl": 380.00,
+      "pnl_pct": 2.06,
+      "exit_reason": "target_hit",
+      "strategy": "technical_signal"
+    }
+  ],
+  "total_count": 47
+}
+```
 
 ---
 
-## Auto-Scanner
+## Scanner Control Endpoints
 
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/scanner/status` | Scanner state, last scan time, last signals |
-| `POST` | `/api/scanner/start` | Start the auto-trading bot |
-| `POST` | `/api/scanner/stop` | Stop the auto-trading bot |
-| `POST` | `/api/scanner/scan-now` | Trigger an immediate scan cycle |
-| `POST` | `/api/scanner/config` | Update scanner settings |
+### GET /api/scanner/status
+
+Get auto-scanner status and last scan results.
+
+**Response:**
+```json
+{
+  "is_running": true,
+  "scans_today": 12,
+  "auto_trades_today": 3,
+  "last_scan_time": "2026-05-03T14:55:00",
+  "last_scan_results": {
+    "movers_found": 8,
+    "auto_buys": [
+      {
+        "symbol": "RELIANCE.NS",
+        "quantity": 10,
+        "price": 2450.50,
+        "score": 0.78
+      }
+    ],
+    "auto_sells": [
+      {
+        "symbol": "HDFC.NS",
+        "exit_price": 2105.00,
+        "pnl": 150.00
+      }
+    ]
+  }
+}
+```
+
+### POST /api/scanner/start
+
+Resume the auto-scanner (if it was stopped).
+
+```json
+{ "success": true, "message": "Scanner resumed" }
+```
+
+### POST /api/scanner/stop
+
+Pause the auto-scanner. Existing positions are still monitored.
+
+```json
+{ "success": true, "message": "Scanner paused. Existing positions still monitored." }
+```
 
 ---
 
-## Watchlist
+## Predictions (Accuracy) Endpoints
 
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/watchlist/custom` | Get the custom ticker list |
-| `POST` | `/api/watchlist/custom` | Add a ticker |
-| `DELETE` | `/api/watchlist/custom/{ticker}` | Remove a ticker |
+### GET /api/predictions
+
+Get all past LLM analyses with outcomes.
+
+**Query Parameters:**
+- `limit` (integer, optional) — Number of records (default: 100)
+- `ticker` (string, optional) — Filter by ticker
+- `rating` (string, optional) — Filter by rating (1/5, 2/5, etc.)
+
+**Response:**
+```json
+{
+  "predictions": [
+    {
+      "id": 1,
+      "ticker": "INFY.NS",
+      "trade_date": "2026-04-22",
+      "decision": "BUY",
+      "rating": "5/5",
+      "price_at_prediction": 1820.00,
+      "current_price": 1842.50,
+      "return_pct": 1.24,
+      "is_win": 1,
+      "outcome_checked_at": "2026-05-01T15:30:00",
+      "created_at": "2026-04-22T10:15:00"
+    }
+  ],
+  "total": 124
+}
+```
+
+### GET /api/predictions/stats
+
+Get accuracy statistics by confidence rating.
+
+**Response:**
+```json
+{
+  "total": 124,
+  "settled": 110,
+  "pending": 14,
+  "win_rate": 0.627,
+  "avg_return": 1.45,
+  "by_rating": {
+    "5/5": { "count": 35, "wins": 26, "win_rate": 0.743, "avg_return": 2.15 },
+    "4/5": { "count": 45, "wins": 28, "win_rate": 0.622, "avg_return": 1.50 },
+    "3/5": { "count": 25, "wins": 14, "win_rate": 0.560, "avg_return": 0.85 },
+    "2/5": { "count": 12, "wins": 4,  "win_rate": 0.333, "avg_return": -0.50 },
+    "1/5": { "count": 7,  "wins": 1,  "win_rate": 0.143, "avg_return": -1.25 }
+  }
+}
+```
 
 ---
 
-## Authentication
+## Market Status Endpoints
 
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/upstox/login` | Generate OAuth login URL and redirect |
-| `GET` | `/callback` | OAuth redirect handler — saves new token to `.env` |
-| `GET` | `/api/upstox/token-status` | Check whether the current token is valid |
+### GET /api/market/status
+
+**Response:**
+```json
+{
+  "status": "OPEN",
+  "is_open": true,
+  "reason": "Trading hours",
+  "time": "14:32:45 IST",
+  "next_trading_day": "2026-05-04"
+}
+```
+
+| Status | Meaning |
+|---|---|
+| `OPEN` | Market trading (09:30–15:20 IST) |
+| `PRE_MARKET` | Before market opens (before 09:30) |
+| `POST_MARKET` | After market closes (after 15:20) |
+| `CLOSED` | Weekend or NSE holiday |
+
+### GET /api/upstox/status
+
+Check Upstox API connection and token validity.
+
+```json
+{
+  "connected": true,
+  "last_quote_time": "2026-05-03T14:32:00",
+  "auth_token_valid": true,
+  "error": null
+}
+```
+
+---
+
+## Error Responses
+
+All endpoints return a standard error format on failure:
+
+```json
+{ "error": "Invalid ticker format", "status": 400 }
+{ "error": "Database connection failed", "status": 500 }
+```
+
+---
+
+## Rate Limits & Caching
+
+| Endpoint | Caching |
+|---|---|
+| `/api/screen` | Cached 5 minutes |
+| `/api/scanner/status` | Real-time, < 100 ms |
+| `/api/paper/*` | Real-time, < 50 ms |
+| `/api/analyze/stream` | No cache, SSE stream |
+| `/api/predictions` | Cached 1 hour |
+
+---
+
+## Python Usage Example
+
+```python
+import requests
+
+# Get scanner status
+resp = requests.get('http://localhost:8000/api/scanner/status')
+status = resp.json()
+print(f"Scanner running: {status['is_running']}")
+print(f"Auto trades today: {status['auto_trades_today']}")
+
+# Get predictions
+resp = requests.get('http://localhost:8000/api/predictions?limit=10')
+for pred in resp.json()['predictions']:
+    print(f"{pred['ticker']}: {pred['decision']} ({pred['return_pct']:.2f}%)")
+
+# Manual buy
+resp = requests.post('http://localhost:8000/api/paper/buy', json={
+    "symbol": "INFY.NS",
+    "quantity": 10,
+    "price": 1842.00,
+    "stop_loss": 1814.00,
+    "target_price": 1920.00,
+    "strategy": "manual"
+})
+print(resp.json())
+```

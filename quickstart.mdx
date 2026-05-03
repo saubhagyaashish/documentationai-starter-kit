@@ -1,162 +1,259 @@
 ---
 title: Setup & Installation
-description: Install, configure, and run TradeBotX locally — prerequisites, environment variables, and the daily Upstox token refresh.
+description: Clone, configure, and run TradeBotX locally — Python venv, API keys, config.json, and how to start both the backend and frontend.
 ---
 
 ## Prerequisites
 
 | Requirement | Version | Notes |
 |---|---|---|
-| **Python** | 3.12+ | Earlier versions are untested |
+| **Python** | 3.10+ | 3.12 recommended |
 | **Node.js** | 18+ | Required for the React frontend |
-| **Upstox Developer Account** | — | Free account at developer.upstox.com |
-| **OpenAI API Key** | — | Required for the 13-agent AI pipeline |
+| **Upstox Developer Account** | — | Free at developer.upstox.com |
+| **LLM API Key** | — | At least one: OpenAI, Anthropic, Google, xAI, or OpenRouter |
 
 <Callout kind="tip">
-  You can use `UPSTOX_MODE=sandbox` in your `.env` for development and testing without a live Upstox trading account.
+  Data fetching (stock prices, fundamentals, news) works out of the box via **yfinance** — no extra key needed. Upstox is required only for live prices during paper trading.
 </Callout>
 
-## Installation
+## Step 1 — Clone & Set Up Python Environment
 
-<Steps>
-  <Step title="Clone the repository" icon="download" title-type="p">
-    ```bash
-    git clone https://github.com/your-org/tradebotx.git
-    cd tradebotx
-    ```
-  </Step>
+```powershell
+# 1. Clone the repo (skip if already done)
+git clone https://github.com/TauricResearch/TradingAgents.git
+cd TradingAgents
 
-  <Step title="Create a Python virtual environment" icon="box" title-type="p">
-    ```bash
-    python -m venv venv
+# 2. Create a virtual environment
+python -m venv venv
 
-    # Windows
-    .\venv\Scripts\activate
+# 3. Activate it
+venv\Scripts\activate          # Windows
+# source venv/bin/activate     # macOS / Linux
 
-    # macOS / Linux
-    source venv/bin/activate
-    ```
-  </Step>
+# 4. Install the package and all dependencies
+pip install -e .
+```
 
-  <Step title="Install Python dependencies" icon="package" title-type="p">
-    ```bash
-    pip install -r requirements.txt
-    ```
-  </Step>
+## Step 2 — Configure API Keys
 
-  <Step title="Configure environment variables" icon="settings" title-type="p">
-    ```bash
-    cp .env.example .env
-    ```
-    Open `.env` and fill in your API keys. See the section below for every required variable.
-  </Step>
+Copy the example env file and fill in your keys:
 
-  <Step title="Install frontend dependencies" icon="layers" title-type="p">
-    ```bash
-    cd frontend
-    npm install
-    cd ..
-    ```
-  </Step>
-</Steps>
+```powershell
+copy .env.example .env
+```
 
-## Environment Variables
+Open `.env` and add your keys. At minimum you need **one LLM provider key**:
 
 ```env
-# LLM Provider
-OPENAI_API_KEY=sk-proj-...
+# ========== LLM Providers (choose one or more) ==========
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+GOOGLE_API_KEY=...
+XAI_API_KEY=...
+OPENROUTER_API_KEY=...
 
-# Upstox API
-UPSTOX_ACCESS_TOKEN=eyJ0eX...     # JWT — populated automatically after OAuth login
-UPSTOX_API_KEY=9e6b9529-...       # From your Upstox developer app
-UPSTOX_API_SECRET=zfzQ8g...       # From your Upstox developer app
+# ========== Upstox (required for live paper trading) ==========
+UPSTOX_API_KEY=your-api-key-here
+UPSTOX_API_SECRET=your-api-secret-here
 UPSTOX_REDIRECT_URI=http://localhost:8000/callback
+UPSTOX_ACCESS_TOKEN=              # leave blank — filled after OAuth login
 UPSTOX_MODE=live                  # "live" or "sandbox"
+
+# ========== Optional: Data Vendors ==========
+# yfinance (free) is the default. Alpha Vantage requires a paid subscription.
+ALPHA_VANTAGE_API_KEY=
+
+# ========== Debug ==========
+DEBUG=false
 ```
 
 <Callout kind="alert">
-  Leave `UPSTOX_ACCESS_TOKEN` blank on first run. The OAuth flow below will populate it automatically after you log in.
+  Never commit `.env` to Git. It contains credentials. Add `.env` to your `.gitignore`.
 </Callout>
 
 ### Getting Your Upstox Keys
 
 <Steps>
   <Step title="Create a developer app" icon="plus" title-type="p">
-    Go to developer.upstox.com, sign in, and create a new app.
+    Go to [developer.upstox.com](https://developer.upstox.com/), sign in with your Upstox trading account, and create a new application named "TradeBotX".
   </Step>
   <Step title="Set the redirect URI" icon="link" title-type="p">
-    In your app settings, set the redirect URI to `http://localhost:8000/callback`.
+    In your app settings, set the **Redirect URI** to `http://localhost:8000/callback`.
   </Step>
   <Step title="Copy your credentials" icon="copy" title-type="p">
-    Copy the **API Key** and **API Secret** into your `.env` file.
+    Copy the **API Key** and **API Secret** into your `.env` file. Leave `UPSTOX_ACCESS_TOKEN` blank for now.
   </Step>
 </Steps>
 
-## Running TradeBotX
+## Step 3 — Configure Runtime Settings
 
-Open two terminal windows and run each command in its own terminal:
+Create or update `config.json` in the project root:
+
+```json
+{
+  "scanner": {
+    "enabled": true,
+    "interval_minutes": 5,
+    "index": "NIFTY50",
+    "buy_score_threshold": 0.65,
+    "sell_score_threshold": 0.35,
+    "max_auto_positions": 3,
+    "position_size_pct": 3.0,
+    "force_close_time": "15:20"
+  },
+  "scheduler": {
+    "enabled": true,
+    "pre_market_time": "08:30"
+  },
+  "paper_trader": {
+    "initial_capital": 100000,
+    "daily_loss_limit_pct": 2.0,
+    "max_position_size_pct": 5.0,
+    "mandatory_stop_loss_pct": 1.5
+  },
+  "upstox": {
+    "api_key": "${UPSTOX_API_KEY}",
+    "api_secret": "${UPSTOX_API_SECRET}"
+  }
+}
+```
+
+**Key settings to tune:**
+
+| Setting | Default | Effect |
+|---|---|---|
+| `scanner.buy_score_threshold` | 0.65 | Raise (e.g. 0.75) for fewer but higher-quality trades |
+| `scanner.position_size_pct` | 3.0 | % of capital per trade (3% = ~33 max positions) |
+| `scanner.max_auto_positions` | 3 | Max concurrent open positions from scanner |
+| `paper_trader.initial_capital` | 100000 | Starting virtual capital in ₹ |
+
+## Step 4 — Start the Backend
 
 <Tabs>
   <Tab title="Terminal 1 — Backend" icon="server">
-    ```bash
-    # Activate the virtual environment first
-    .\venv\Scripts\activate      # Windows
-    source venv/bin/activate     # macOS / Linux
+    ```powershell
+    # Make sure venv is active
+    venv\Scripts\activate
 
     python api_server.py
     ```
-    The backend starts at **http://localhost:8000**.
+
+    On successful startup you should see:
+    ```
+    Uvicorn running on http://localhost:8000
+    Database initialised
+    Upstox client initialised (live mode)
+    Paper trader initialised with ₹100000 capital
+    Scheduler initialised
+    Auto-scanner resumed (was enabled in config)
+    ```
   </Tab>
   <Tab title="Terminal 2 — Frontend" icon="monitor">
-    ```bash
+    ```powershell
     cd frontend
+    npm install          # only needed the first time
     npm run dev
     ```
-    The frontend starts at **http://localhost:5173**.
+
+    Open **http://localhost:5173** in your browser.
   </Tab>
 </Tabs>
 
-Then open **http://localhost:5173** in your browser.
+<Callout kind="alert">
+  Do **not** run `python main.py` to start the dashboard — that is a standalone CLI demo script that runs the 13-agent pipeline directly without a UI. Use `api_server.py` + `npm run dev` for the full dashboard experience.
+</Callout>
 
-## Daily Token Refresh
+## Step 5 — Authorize Upstox (First Run)
 
-Upstox tokens expire every day at **midnight IST** and must be refreshed once per day. The process takes under 30 seconds:
+After starting the backend, you need to authorize Upstox once:
 
 <Steps>
   <Step title="Open the login URL" icon="external-link" title-type="p">
-    Navigate to **http://localhost:8000/api/upstox/login** in your browser.
+    Visit **http://localhost:5173** and click **"Login to Upstox"** in the top-right corner, or navigate directly to `http://localhost:8000/callback`.
   </Step>
-  <Step title="Log in to Upstox" icon="lock" title-type="p">
-    You will be redirected to Upstox's login page. Enter your credentials and click **Authorize**.
+  <Step title="Grant permission" icon="lock" title-type="p">
+    Log in to Upstox and click **Authorize**. Upstox redirects back to `http://localhost:8000/callback?code=xxx`.
   </Step>
   <Step title="Token saved automatically" icon="check-circle" title-type="p">
-    The callback handler saves the new token to `.env`. No server restart needed.
+    The access token is saved to your `.env` file and loaded in-memory. No restart needed. Tokens expire at **midnight IST** daily and must be refreshed each morning.
   </Step>
 </Steps>
 
-## Verify Everything Is Working
+## Quick Reference
 
-```bash
-# Should return live prices for all NIFTY 50 stocks
-curl http://localhost:8000/api/upstox/ltp/batch?index=NIFTY50
-```
+| Goal | Command |
+|---|---|
+| Activate venv | `venv\Scripts\activate` |
+| Install / update deps | `pip install -e .` |
+| Start backend API | `python api_server.py` |
+| Start frontend | `cd frontend && npm run dev` |
+| Open dashboard | http://localhost:5173 |
+| Test API is up | `curl http://localhost:8000/api/paper/performance` |
+| Test pipeline (no UI) | `python main.py` |
+| Run tests | `pytest tests/` |
 
-If you see `401 Unauthorized`, your Upstox token has expired — run the daily token refresh above.
+## Using the Dashboard
+
+<Steps>
+  <Step title="Scan the market" icon="search" title-type="p">
+    Open the **Screener** tab. Pick **NIFTY 50** from the dropdown and click **Scan Market**. The screener fetches live stock data and flags interesting stocks (RSI extremes, volume spikes, price action).
+  </Step>
+  <Step title="Launch AI analysis" icon="cpu" title-type="p">
+    Click **Analyse** next to any flagged stock. Watch the 13-agent pipeline progress live and get a final **BUY / OVERWEIGHT / HOLD / UNDERWEIGHT / SELL** recommendation.
+  </Step>
+  <Step title="Monitor auto-trading" icon="trending-up" title-type="p">
+    The **Dashboard** tab shows real-time market status, daily loss limit bar, win/loss pie chart, and active positions. The auto-scanner logs "AUTO BUY" and "AUTO SELL" messages in Terminal 1.
+  </Step>
+  <Step title="Review predictions" icon="check-circle" title-type="p">
+    The **Predictions** tab tracks every AI recommendation against real price movements — win rate, average return, and accuracy by confidence rating.
+  </Step>
+</Steps>
 
 ## Troubleshooting
 
-<Expandable title="ModuleNotFoundError on startup" default-open="false">
-  Your virtual environment is not activated. Run `.\venv\Scripts\activate` (Windows) or `source venv/bin/activate` (macOS/Linux) before running `python api_server.py`.
-</Expandable>
+| Issue | Fix |
+|---|---|
+| `ModuleNotFoundError` | Activate venv: `venv\Scripts\activate` |
+| `pip install -e .` fails | Update pip: `python -m pip install --upgrade pip` |
+| `OPENAI_API_KEY not found` | Check `.env` file in project root |
+| `Failed to connect to backend` | Ensure `python api_server.py` is running in Terminal 1 |
+| `npm: command not found` | Install Node.js 18+ from nodejs.org |
+| `ENOENT: no such file` in frontend | Run `npm install` inside the `frontend/` folder first |
+| Frontend blank page | Check browser console (F12) for errors; restart both terminals |
+| Scanner not starting | Check Upstox token in `.env`. Run `python upstox_auth.py` to refresh |
+| "Database is locked" error | SQLite locking issue — restart `api_server.py` |
+| Market data 15+ min old | Using yfinance (free, delayed). Upstox provides real-time data |
+| `KeyboardInterrupt` in `main.py` | Normal — you pressed Ctrl+C. The pipeline was running fine |
 
-<Expandable title="404 Not Found for a specific stock" default-open="false">
-  The instrument ISIN for that stock has changed due to a corporate action (split, bonus issue, demerger). Update the mapping in `upstox_client.py` with the current ISIN from nseindia.com.
-</Expandable>
+## Common Tasks
 
-<Expandable title="Intraday signal scores stuck at 0.5" default-open="false">
-  The intraday candle endpoint returns `404` when the market is closed (weekends and public holidays). This is expected — the engine falls back to SMA-200 as a VWAP substitute outside market hours.
-</Expandable>
+### Change Scanner Sensitivity
 
-<Expandable title="RateLimitError from OpenAI" default-open="false">
-  The 13-agent pipeline makes many LLM calls in sequence. Free-tier OpenAI accounts may hit rate limits. Add a delay in `default_config.py` or upgrade your OpenAI plan.
-</Expandable>
+Edit `config.json`:
+```json
+{
+  "scanner": {
+    "buy_score_threshold": 0.55
+  }
+}
+```
+Lower = more trades (aggressive). Higher = fewer trades (conservative).
+
+### Pause Auto-Scanner
+```bash
+curl -X POST http://localhost:8000/api/scanner/stop
+```
+
+### Reset Paper Trading Capital
+
+Delete `predictions.db` and restart `api_server.py`. A fresh database is created with ₹100,000 capital.
+
+### View Portfolio P&L
+```bash
+curl http://localhost:8000/api/paper/performance
+```
+
+### Export Trade History
+```bash
+sqlite3 predictions.db "SELECT * FROM paper_trades;" > trades.csv
+```

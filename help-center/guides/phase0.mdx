@@ -1,0 +1,149 @@
+---
+title: Phase 0 — Baseline Testing Checklist
+description: 5-day baseline testing plan for the TradeBotX signal scanner (May 5–8 2026) — setup, daily metrics, success criteria, and troubleshooting.
+---
+
+## Overview
+
+<Callout kind="info">
+  **Goal:** Run the signal scanner for 5 trading days with no agent integration to establish baseline metrics.  
+  **Duration:** Fri 5/2 + Mon–Thu 5/5–5/8 2026  
+  **Success:** ≥40% win rate, zero crashes, metrics recorded for all 5 days
+</Callout>
+
+## Setup (Before Market Opens)
+
+<Steps>
+  <Step title="Enable scanner in config.json" icon="settings" title-type="p">
+    Open `D:\TradingAgents\config.json` and add/update the scanner section:
+
+    ```json
+    {
+      "scanner": {
+        "enabled": true,
+        "interval_minutes": 5,
+        "index": "NIFTY50",
+        "buy_score_threshold": 0.65,
+        "sell_score_threshold": 0.35,
+        "max_auto_positions": 3,
+        "position_size_pct": 3.0,
+        "force_close_time": "15:20"
+      }
+    }
+    ```
+  </Step>
+  <Step title="Start the API server" icon="terminal" title-type="p">
+    ```powershell
+    # Terminal 1
+    python api_server.py
+    ```
+
+    Expected startup output:
+    ```
+    Uvicorn running on http://localhost:8000
+    Database initialised
+    Upstox client initialised (live mode)
+    Paper trader initialised with ₹100000 capital
+    Scheduler initialised
+    Auto-scanner resumed (was enabled in config)
+    ```
+  </Step>
+  <Step title="Verify the API is live" icon="check-circle" title-type="p">
+    ```bash
+    # Terminal 2
+    curl http://localhost:8000/api/paper/performance
+    ```
+
+    Should return JSON with current capital, P&L, and trade count.
+  </Step>
+</Steps>
+
+## Daily Checklist
+
+### Before Market Opens (09:30 IST)
+
+- [ ] API server is running (`localhost:8000` responds)
+- [ ] Scanner is active — check `curl http://localhost:8000/api/scanner/status`
+- [ ] `/api/paper/performance` returns valid data
+
+### During Market Hours (09:30–15:20 IST)
+
+- [ ] Monitor scanner logs in Terminal 1 for `AUTO BUY` / `SELL` messages
+- [ ] Note any `ERROR` or `EXCEPTION` lines in logs
+
+### After Market Closes (15:20+ IST)
+
+Collect end-of-day metrics:
+
+```bash
+curl http://localhost:8000/api/paper/performance | python -m json.tool
+```
+
+Record in `PHASE_0_RESULTS.md`:
+
+```
+Day X (YYYY-MM-DD):
+- Win rate: XX% (Y wins, Z losses)
+- Total trades: N
+- Daily P&L: +/- ₹X
+- Avg P&L per trade: ₹X
+- Max consecutive losses: X
+- Status: OK / ERRORS
+- Notes: [any issues]
+```
+
+Key fields to copy from the API response:
+
+| Field | Meaning |
+|---|---|
+| `win_rate` | Win rate % |
+| `trades_today` | Total trades this day |
+| `daily_pnl` | P&L in rupees |
+| `avg_pnl_per_trade` | Average P&L per trade |
+| `consecutive_losses` | Max consecutive losing trades |
+
+## Success Criteria
+
+All five must pass after 5 trading days:
+
+- [ ] Win rate ≥ 40%
+- [ ] Zero crashes in 5 days
+- [ ] Average trade P&L ≥ ₹100
+- [ ] Metrics recorded for all 5 days
+- [ ] Scanner ran every 5 minutes during market hours
+
+<Callout kind="alert">
+  If **any criterion fails**, debug the scanner logic before proceeding to Phase 1. Win rate < 40% is expected for the baseline — document it and Phase 1–2 improvements will address it.
+</Callout>
+
+## Key Files to Monitor
+
+| File | Contains |
+|---|---|
+| Terminal 1 logs | Real-time scanner activity (`AUTO BUY`, `SELL`, errors) |
+| `scanner_log.json` | Last scan results (scores, decisions) |
+| `predictions.db → paper_trades` | All executed trades (open and closed) |
+
+```bash
+# Query all trades for today
+sqlite3 predictions.db "SELECT symbol, direction, entry_price, exit_price, pnl FROM paper_trades WHERE DATE(entry_time) = DATE('now');"
+```
+
+## Troubleshooting
+
+| Issue | Solution |
+|---|---|
+| Scanner not starting | Check Upstox token in `.env`. Run `python upstox_auth.py` to re-authenticate. |
+| No trades entered | Lower `buy_score_threshold` in config (e.g., 0.60). Scores may be conservative. |
+| API returns 500 | Check terminal logs — likely missing Upstox token or database corruption. |
+| Win rate < 40% | Expected for baseline. Document and proceed to Phase 1 anyway. |
+| Crash during trading | Check logs for exceptions — common causes: slippage rounding, position size calculation, SL/TP logic. |
+
+## Next Steps
+
+**After 5 days:** Review `PHASE_0_RESULTS.md` against success criteria.
+
+| Outcome | Action |
+|---|---|
+| All criteria pass | Create `PHASE_1_CHECKLIST.md` and wire the feedback loop (already coded — just verify). |
+| Any criterion fails | Debug scanner logic or signal score computation. Re-run Phase 0. |

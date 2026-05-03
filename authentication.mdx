@@ -1,6 +1,6 @@
 ---
-title: Upstox Integration
-description: OAuth 2.0 authentication, all API endpoints used, WebSocket feed, instrument key mapping, and rate limits for the Upstox V2/V3 integration.
+title: Upstox Integration & OAuth
+description: Complete guide to Upstox OAuth 2.0, token lifecycle, REST API usage, WebSocket feed, batch LTP, and sandbox vs. live mode.
 ---
 
 ## Overview
@@ -9,104 +9,244 @@ TradeBotX uses **Upstox V2 and V3 APIs** as its exclusive source of live Indian 
 
 | File | Responsibility |
 |---|---|
-| `upstox_auth.py` | OAuth 2.0 token management |
-| `upstox_client.py` | REST API wrapper for market data |
-| `upstox_ws.py` | WebSocket feed for real-time ticks |
+| `upstox_auth.py` (222 lines) | OAuth 2.0 token management, validation, persistence |
+| `upstox_client.py` (700+ lines) | REST API wrapper — LTP, candles, quotes, orders |
+| `upstox_ws.py` (347 lines) | WebSocket V3 feed — real-time tick streaming |
 
-## Authentication
+**Key features:**
+- ✅ Automatic token validation on startup
+- ✅ Token persists to `.env` file (survives app restarts)
+- ✅ Live and Sandbox modes
+- ✅ Batch LTP for 50 stocks in a single API call
+- ✅ WebSocket authorization for real-time market data
 
-Upstox uses **OAuth 2.0 with a daily-expiring JWT**. Tokens expire at **midnight IST** every day.
+## Token Lifecycle
+
+```
+1. INITIALIZATION (api_server.py startup)
+   ├── load_config_from_env()
+   │   └── Reads UPSTOX_ACCESS_TOKEN from .env
+   ├── validate_token(config)
+   │   └── Hits /v2/user/profile to verify token
+   │       └── On success: set config.is_valid = True
+   │       └── On failure: log warning, disable Upstox features
+   └── Token ready for all API calls
+
+2. API CALLS
+   └── Authorization: Bearer {access_token} in every request header
+
+3. TOKEN REFRESH (user initiates OAuth once daily)
+   ├── User clicks "Login to Upstox" in UI
+   ├── Redirects to Upstox → user grants permission
+   ├── Backend exchanges code for new access_token
+   ├── persist_token_to_env(new_token)
+   └── Token saved to .env + in-memory config (no restart needed)
+```
+
+<Callout kind="alert">
+  Upstox tokens expire at **midnight IST** every day. If you see `401 Unauthorized` errors, run the OAuth flow again. The dashboard shows a "Login to Upstox" button when the token is invalid.
+</Callout>
+
+## Setup Guide
 
 <Steps>
-  <Step title="Open the login URL" icon="external-link" title-type="p">
-    Navigate to `http://localhost:8000/api/upstox/login`. TradeBotX generates the Upstox OAuth authorization URL and redirects you there.
+  <Step title="Get API keys from Upstox" icon="key" title-type="p">
+    Visit [developer.upstox.com](https://developer.upstox.com/). Sign in with your Upstox trading account and create a new application named "TradeBotX". Set the **Redirect URI** to `http://localhost:8000/callback`. Copy the **API Key** and **API Secret**.
   </Step>
-  <Step title="Authorize in Upstox" icon="lock" title-type="p">
-    Log in to your Upstox account and click **Authorize**. Upstox redirects you back to the callback URL.
+  <Step title="Configure .env" icon="settings" title-type="p">
+    ```env
+    UPSTOX_API_KEY=your-api-key-here
+    UPSTOX_API_SECRET=your-api-secret-here
+    UPSTOX_REDIRECT_URI=http://localhost:8000/callback
+    UPSTOX_ACCESS_TOKEN=              # leave blank initially
+    UPSTOX_MODE=live                  # "live" or "sandbox"
+    ```
   </Step>
-  <Step title="Token saved automatically" icon="save" title-type="p">
-    The callback handler exchanges the authorization code for a JWT and saves it to your `.env`. No server restart needed.
+  <Step title="Run OAuth login (first time)" icon="external-link" title-type="p">
+    Start `api_server.py` and open the dashboard at `http://localhost:5173`. Click **"Login to Upstox"** in the top-right corner. Grant permission and the token is saved automatically.
+  </Step>
+  <Step title="Verify connection" icon="check-circle" title-type="p">
+    Check startup logs for `✅ Upstox token valid — user: your_name (live mode)`. If you see `❌ Upstox token invalid`, repeat the login step.
   </Step>
 </Steps>
 
-<Callout kind="alert">
-  Tokens expire at **midnight IST** daily. If you see `401 Unauthorized` errors, run the login flow again at `http://localhost:8000/api/upstox/login`.
-</Callout>
+## OAuth Flow (Detailed)
 
-```bash
-# Using the token in direct API calls
-curl https://api.upstox.com/v2/user/profile \
-  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
-  -H "Accept: application/json"
+### 1. Authorization Request
+
+User clicks "Login to Upstox" → browser redirects to:
+
+```
+https://api.upstox.com/v2/login/authorization/dialog
+  ?client_id=YOUR_API_KEY
+  &redirect_uri=http://localhost:8000/callback
+  &response_type=code
+```
+
+### 2. Token Exchange
+
+After user grants permission, Upstox redirects to `http://localhost:8000/callback?code=xxxxxx`. The backend performs:
+
+```
+POST https://api.upstox.com/v2/login/authorization/token
+Content-Type: application/x-www-form-urlencoded
+
+code=xxxxxx
+&client_id=YOUR_API_KEY
+&client_secret=YOUR_API_SECRET
+&redirect_uri=http://localhost:8000/callback
+&grant_type=authorization_code
+```
+
+**Response:**
+```json
+{
+  "access_token": "eyJ0eXAiOiJKV1Qi...",
+  "token_type": "Bearer",
+  "expires_in": 86400
+}
+```
+
+### 3. Token Persistence
+
+```python
+persist_token_to_env(new_token)
+# 1. Reads .env from disk
+# 2. Updates UPSTOX_ACCESS_TOKEN=xxx line
+# 3. Writes back to disk
+# 4. Updates os.environ in-process (no restart needed)
 ```
 
 ## REST API Endpoints Used
 
 | Upstox Endpoint | TradeBotX Usage | Version |
 |---|---|---|
-| `GET /v2/market-quote/ltp` | Batch live prices for 48 stocks in one call | V2 |
-| `GET /v2/market-quote/quotes` | Full OHLCV + market depth for a single stock | V2 |
+| `GET /v2/market-quote/ltp` | Batch live prices for 50 stocks in one call | V2 |
+| `GET /v2/market-quote/quotes` | Full OHLCV + market depth for a stock | V2 |
 | `GET /v3/historical-candle/{key}/{unit}/{interval}` | 100-day daily OHLCV for indicators | V3 |
 | `GET /v3/intraday-candle/{key}/{unit}/{interval}` | Today's 5-min candles for VWAP | V3 |
 | `GET /v2/user/profile` | Token validation on startup | V2 |
 | `GET /v2/instruments/search` | Symbol-to-ISIN lookup | V2 |
-| `wss://api.upstox.com/v3/feed` | Real-time WebSocket tick streaming | V3 WS |
+| `wss://stream.upstox.com/v3/...` | Real-time WebSocket tick streaming | V3 WS |
 
 ### Batch LTP — Most Common Operation
 
-All 48 NIFTY 50 prices are fetched in a **single API call**, keeping rate-limit usage minimal:
+All 50 NIFTY stock prices fetched in a **single API call**:
 
-```bash
-GET http://localhost:8000/api/upstox/ltp/batch?index=NIFTY50
+```python
+# ✅ Fast: 1 API call for 50 stocks (~100ms)
+ltps = await client.get_batch_ltp(nifty_50_symbols)
+# Returns: {"RELIANCE": 2850.5, "TCS": 3400.0, "INFY": 1842.5, ...}
 
-# Response
-{
-  "prices": {
-    "RELIANCE": 2945.50,
-    "TCS": 3812.00,
-    "HDFCBANK": 1680.25
-  },
-  "timestamp": "2025-01-15T10:30:00+05:30"
-}
+# ❌ Slow: 50 separate calls
+for symbol in nifty_50:
+    ltp = await client.get_ltp_by_symbol(symbol)
 ```
 
-## WebSocket Feed
+### Historical Candles
 
-`upstox_ws.py` maintains a persistent WebSocket connection to the Upstox V3 feed.
+```python
+# Daily OHLCV for indicators (cached 60 min)
+candles_df = await client.get_candles_as_df("INFY", unit="days", interval="1")
+
+# 5-minute intraday bars for VWAP
+intraday_df = await client.get_intraday_candles_as_df("INFY", interval="5")
+```
+
+### Order Placement (Paper Trading — Future Live Mode)
+
+```python
+# Market order
+order_id = await client.place_order(
+    instrument_token="NSE_EQ|INE009A01021",
+    quantity=10,
+    order_type="MARKET",
+    transaction_type="BUY",
+    product="I"   # Intraday
+)
+
+# Stop-loss market order
+order_id = await client.place_order(
+    instrument_token="NSE_EQ|INE009A01021",
+    quantity=10,
+    order_type="SL-M",
+    transaction_type="SELL",
+    trigger_price=1814.0
+)
+```
+
+## WebSocket Real-Time Feed
+
+`upstox_ws.py` maintains a persistent WebSocket connection for tick-by-tick data:
+
+```python
+# Get authorized WebSocket URL
+ws_url = await client.get_ws_feed_url()
+
+# Connect and subscribe
+ws = UpstoxWebSocket(ws_url, on_tick=handle_tick)
+await ws.connect()
+await ws.subscribe(["NSE_EQ|INE009A01021", "NSE_EQ|INE002A01018"])
+
+def handle_tick(tick_data: dict):
+    ltp = tick_data.get("last_price")
+    bid = tick_data.get("bid")
+    ask = tick_data.get("ask")
+```
 
 | Feature | Detail |
 |---|---|
 | **Feed modes** | `LTPC` (last price + change) or `Full` (OHLCV + depth + OI) |
-| **Auto-reconnect** | Reconnects with exponential backoff on disconnect |
+| **Auto-reconnect** | Exponential backoff on disconnect |
 | **Subscriptions** | Up to 1,000 instrument keys per connection |
 | **Data format** | Protobuf, decoded to JSON by the client |
-
-<Callout kind="info">
-  The WebSocket feed activates only when the auto-scanner is running or when the Paper Trading view has live updates enabled. It is not connected on startup by default.
-</Callout>
+| **Status** | Skeleton ready — not activated by default in current build |
 
 ## Instrument Key Format
 
-Upstox identifies each stock with an **instrument key**:
+Upstox identifies each stock with a key: `{EXCHANGE_SEGMENT}|{ISIN}`
 
-```
-{EXCHANGE_SEGMENT}|{ISIN}
-```
-
-| Example | Stock |
+| Instrument Key | Stock |
 |---|---|
 | `NSE_EQ\|INE002A01018` | Reliance Industries |
 | `NSE_EQ\|INE009A01021` | Infosys |
+| `NSE_EQ\|INE467B01029` | TCS |
+| `NSE_EQ\|INE040A01034` | HDFC Bank |
 
-TradeBotX maintains hardcoded mappings in `upstox_client.py` for:
-- **NIFTY 50** — 48 instruments
-- **NIFTY BANK** — 12 instruments
+TradeBotX maintains hardcoded mappings in `upstox_client.py` for **NIFTY 50** (50 instruments) and **NIFTY BANK** (12 instruments).
 
 <Callout kind="alert">
   ISINs can change after corporate actions (splits, bonus issues, demergers). If a stock returns `404`, update its mapping in `upstox_client.py` with the current ISIN from nseindia.com.
 </Callout>
 
-## Rate Limits
+## Sandbox vs. Live Mode
+
+<Tabs>
+  <Tab title="Sandbox Mode" icon="box">
+    ```env
+    UPSTOX_MODE=sandbox
+    UPSTOX_API_KEY=sandbox-api-key
+    UPSTOX_API_SECRET=sandbox-api-secret
+    ```
+    - ✅ No real money at risk
+    - ✅ All API endpoints available
+    - ✅ Safe for development and testing
+    - Note: Sandbox has separate API keys from live
+  </Tab>
+  <Tab title="Live Mode" icon="activity">
+    ```env
+    UPSTOX_MODE=live
+    UPSTOX_API_KEY=live-api-key
+    UPSTOX_API_SECRET=live-api-secret
+    ```
+    - ⚠️ Real brokerage account data
+    - ✅ Real-time prices (not delayed)
+    - Currently used only for paper trading (no real orders placed)
+    - Test thoroughly in sandbox first
+  </Tab>
+</Tabs>
+
+## Rate Limits & Caching
 
 | Limit Type | Value |
 |---|---|
@@ -114,11 +254,66 @@ TradeBotX maintains hardcoded mappings in `upstox_client.py` for:
 | Historical candle requests per day | 1,000 |
 | Intraday candle requests per day | 1,000 |
 
-TradeBotX reduces rate-limit impact through batch LTP calls, on-demand signal computation, and a 60-second in-memory signal cache.
+TradeBotX minimises rate-limit usage through:
+- **Batch LTP calls** — 50 stocks in 1 API call per scan
+- **Candle cache** — 60-minute TTL in `signal_scanner.py` (`_candle_cache`)
+- **On-demand scoring** — indicators computed only on stocks that moved > 0.5%
 
-## Sandbox vs. Live Mode
+### Candle Cache Performance
 
-```env
-UPSTOX_MODE=live      # Real market data — daily token required
-UPSTOX_MODE=sandbox   # Simulated data — suitable for development
 ```
+Without caching: 50 API calls per 5-min scan = 288 × 50 = 14,400 calls/day
+With 60-min cache: ~5–10 API calls per scan = ~300 calls/day
+```
+
+## Error Handling
+
+| Error | Cause | Fix |
+|---|---|---|
+| `HTTP 401 Unauthorized` | Token expired | Click "Login to Upstox" to re-authorize |
+| `HTTP 400 Token exchange failed` | Invalid code or wrong API key | Check `UPSTOX_API_KEY` and `UPSTOX_API_SECRET` in `.env` |
+| `UPSTOX_ACCESS_TOKEN not set` | Token not yet obtained | Complete the OAuth login flow |
+| `httpx.TimeoutException` | Upstox API slow | Retry after 5–10 seconds |
+| `404 on intraday candles` | Market is closed | Expected — scanner falls back to daily data |
+| `API key/secret not configured` | Missing env vars | Fill in `.env` file |
+
+## Python Usage Examples
+
+```python
+from upstox_auth import load_config_from_env, validate_token
+from upstox_client import UpstoxClient
+
+# Load and validate token
+config = load_config_from_env()
+is_valid = await validate_token(config)
+
+if is_valid:
+    client = UpstoxClient(config)
+
+    # Batch LTP for 50 stocks
+    ltps = await client.get_batch_ltp(nifty_50_symbols)
+
+    # Historical daily candles
+    df = await client.get_candles_as_df("INFY", unit="days", interval="1")
+
+    # Get portfolio positions
+    positions = await client.get_positions()
+
+    await client.close()
+```
+
+## Best Practices
+
+**Do:**
+- ✅ Validate token on every server startup
+- ✅ Use batch endpoints (`get_batch_ltp`) — far fewer API calls
+- ✅ Cache candles with 60-min TTL
+- ✅ Test in sandbox before switching to live
+- ✅ Keep `.env` out of Git (add to `.gitignore`)
+
+**Don't:**
+- ❌ Store access tokens in source code
+- ❌ Commit `.env` to Git
+- ❌ Ignore HTTP 401 errors — means token expired
+- ❌ Create a new `UpstoxClient` on every API call — reuse the instance
+- ❌ Place orders in live mode without testing paper trading first

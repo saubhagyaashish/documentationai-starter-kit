@@ -1,0 +1,193 @@
+---
+title: Thread Safety & Concurrency
+description: How TradeBotX prevents race conditions using three RLocks — their locations, what they protect, lock hierarchy, and safe/unsafe patterns.
+---
+
+## Overview
+
+TradeBotX uses three `threading.RLock()` instances to prevent data corruption when multiple threads access shared state simultaneously:
+
+| Lock | File | Protects |
+|---|---|---|
+| `_state_lock` | `api_server.py:53` | Upstox client + paper trader + scanner (global state) |
+| `_db_lock` | `paper_trader.py:131` | All SQLite reads and writes |
+| `_scanner_lock` | `signal_scanner.py:42` | Signal calculation + candle cache |
+
+**Why RLock (reentrant) instead of Lock?** The same thread can acquire an RLock multiple times without deadlocking. This allows nested calls like `validate_trade()` → `enter_trade()` where both acquire `_state_lock`.
+
+## Lock Hierarchy
+
+**Always acquire locks in this order:**
+
+```
+1. _state_lock   (outermost)
+2. _db_lock
+3. _scanner_lock (innermost)
+```
+
+Reversing this order causes deadlock. Never hold a lower lock and try to acquire a higher one.
+
+```python
+# ✅ Safe patterns
+with _state_lock:
+    upstox_client.get_ltp(symbol)          # no DB needed
+
+with _state_lock:
+    with paper_trader._db_lock:
+        paper_trader.enter_trade(...)      # state then DB
+
+with _scanner_lock:
+    score = compute_signal_score(...)      # scanner alone
+
+# ❌ DEADLOCK — wrong order
+with paper_trader._db_lock:
+    with _state_lock:   # wrong! _state_lock must come first
+        ...
+
+with _scanner_lock:
+    with paper_trader._db_lock:  # wrong! _db_lock must come first
+        ...
+```
+
+## Lock 1 — `_state_lock` (API Server)
+
+Protects global objects in `api_server.py` that multiple HTTP endpoints and background jobs access:
+- `upstox_client` — Upstox REST client
+- `paper_trader` — paper trading engine
+- `upstox_config.access_token` — updated by OAuth callback
+
+```python
+# Every endpoint that touches global state:
+@app.post("/api/paper/buy")
+async def buy(symbol: str, qty: int):
+    with _state_lock:
+        if not paper_trader:
+            raise HTTPException(503, "Paper trader not ready")
+        result = paper_trader.enter_trade(symbol, qty, ...)
+    return result
+```
+
+## Lock 2 — `_db_lock` (Paper Trader)
+
+Prevents SQLite corruption when multiple threads read-modify-write the portfolio:
+
+```
+Without lock (❌ Lost Update):
+  Thread 1: SELECT capital → 100,000
+  Thread 2: SELECT capital → 100,000  (stale read)
+  Thread 2: UPDATE capital = 130,000
+  Thread 1: UPDATE capital = 150,000  ← Thread 2's write is lost!
+  Result: 150,000 instead of correct 180,000
+
+With lock (✅ Correct):
+  Thread 1: acquires _db_lock
+  Thread 1: SELECT → 100,000, UPDATE → 150,000, release
+  Thread 2: acquires _db_lock (was waiting)
+  Thread 2: SELECT → 150,000, UPDATE → 180,000, release
+  Result: 180,000 ✓
+```
+
+**Rule:** Hold `_db_lock` for the **entire transaction** (SELECT + UPDATE together), never release between them.
+
+## Lock 3 — `_scanner_lock` (Signal Scanner)
+
+Prevents two concurrent scan cycles from racing on the shared candle cache:
+
+```python
+async def run_signal_scan(...):
+    # Non-blocking acquire — skip if already scanning
+    if not scanner_state._scan_lock.acquire(blocking=False):
+        logger.warning("Scan already running, skipping")
+        return
+
+    try:
+        with _scanner_lock:
+            ltps = await client.get_batch_ltp(symbols)
+            for symbol, ltp in ltps.items():
+                candles = await get_cached_daily_candles(symbol)
+                score = compute_signal_score(candles, ...)
+    finally:
+        scanner_state._scan_lock.release()
+```
+
+Non-blocking acquire means: if a scan takes longer than 5 minutes, the next scheduled run is skipped rather than stacking up.
+
+## Candle Cache (60-min TTL)
+
+```python
+_candle_cache: dict[str, tuple] = {}  # {symbol: (dataframe, timestamp)}
+
+async def get_cached_daily_candles(client, symbol, ttl_minutes=60):
+    if symbol in _candle_cache:
+        data, timestamp = _candle_cache[symbol]
+        if (now - timestamp).seconds < ttl_minutes * 60:
+            return data   # cache hit
+
+    data = await client.get_candles_as_df(symbol, ...)
+    _candle_cache[symbol] = (data, now)
+    return data
+```
+
+Result: ~5–10 API calls per scan vs. 50+ without caching.
+
+## Scenario: Dashboard Buy While Scanner Auto-Trades
+
+```
+Thread 1 (HTTP endpoint):           Thread 2 (Scanner)
+POST /api/paper/buy                 run_signal_scan()
+  acquire _state_lock                 acquire _scanner_lock
+  acquire _db_lock                    compute signals...
+  INSERT paper_trades                 acquire _state_lock ← waits
+  UPDATE paper_portfolio              (blocked until Thread 1 releases)
+  release _db_lock                    acquire _db_lock
+  release _state_lock                 INSERT paper_trades
+                                      release _db_lock
+                                      release _state_lock
+                                      release _scanner_lock
+
+Result: ✅ Both trades complete correctly, capital decremented atomically
+```
+
+## Best Practices
+
+**Do:**
+- ✅ Use `with lock:` context managers — auto-releases on exception
+- ✅ Hold locks briefly (< 100 ms) — move slow I/O outside the lock
+- ✅ Follow hierarchy: `_state_lock` → `_db_lock` → `_scanner_lock`
+- ✅ Use RLock everywhere — safe for same-thread re-acquisition
+
+**Don't:**
+- ❌ Do HTTP requests or file I/O inside locks — blocks all other threads
+- ❌ Reverse lock acquisition order — deadlock
+- ❌ Use bare `lock.acquire()` without `try/finally` — easy to forget release
+- ❌ Mix async and sync locks — sync RLock inside `async def` blocks the event loop
+  ```python
+  # ✅ Correct in async context:
+  async def my_handler():
+      data = await upstox_client.get_ltp(symbols)  # async I/O outside lock
+      with _state_lock:                             # sync lock for quick DB op
+          paper_trader.enter_trade(...)
+  ```
+
+## Testing Thread Safety
+
+```python
+import threading
+from paper_trader import PaperTrader
+
+def test_concurrent_trades():
+    pt = PaperTrader(initial_capital=100_000)
+    results = []
+
+    def trade(symbol):
+        pt.enter_trade(symbol, qty=1, entry_price=1000, sl=950, tp=1050)
+        results.append(symbol)
+
+    t1 = threading.Thread(target=trade, args=("INFY",))
+    t2 = threading.Thread(target=trade, args=("TCS",))
+    t1.start(); t2.start()
+    t1.join(); t2.join()
+
+    assert len(results) == 2
+    assert pt.capital == 98_000  # 100k - 2 × 1k
+```

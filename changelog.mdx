@@ -1,68 +1,187 @@
 ---
 title: Roadmap & Known Limitations
-description: Current limitations, short-term improvements, and the long-term vision for TradeBotX.
+description: Current project status, phase roadmap to full autonomy, known limitations, and an honest assessment of what's achievable.
+---
+
+## Current Status (May 2026)
+
+### Completed Phases ✅
+
+| Phase | Feature | Completed |
+|---|---|---|
+| Phase 6 | Paper trading engine with risk management | 2026-05-01 |
+| Phase 7 | Real-time data layer (Upstox API v3, batch LTP) | 2026-05-01 |
+| Phase 8 | Fast signal layer (9 technical indicators, dual-timeframe) | 2026-05-01 |
+| Phase 9 | Risk management engine (daily loss limit, circuit breakers) | 2026-05-01 |
+
+### In Progress 🟡
+
+- **Phase 10 — Auto Paper Trading Bot:** Scanner runs every 5 min, auto-enters/exits based on technical signals. Implementation done. **Phase 0 testing: May 5–8, 2026** (5 trading days, target ≥ 40% win rate, zero crashes).
+
+### Planned Phases ⏳
+
+| Phase | Feature | Effort | Status |
+|---|---|---|---|
+| 11 | Advanced analytics (Sharpe, Sortino, Alpha vs NIFTY) | 3–4 h | Design phase |
+| 12 | Cloud deployment (24/7 VPS uptime) | 2–3 h | Not started |
+| 13 | 3-month paper trading period (prove edge) | 3 months | Waiting for Phase 0 |
+| 14 | Go live with real capital (₹10,000 to start) | Operational | Pending Phase 13 |
+
 ---
 
 ## Known Limitations
 
-These are the current constraints you should be aware of before using TradeBotX in a live environment:
+These are the current constraints to be aware of:
 
 | Limitation | Impact | Workaround |
 |---|---|---|
-| **Daily token expiry** | Upstox tokens expire at midnight IST every day | Run the OAuth flow once each morning at `/api/upstox/login` |
-| **Intraday 404s** | The V3 intraday candle endpoint returns `404` when the market is closed | Expected — the engine falls back to SMA-200 as a VWAP substitute |
-| **Hardcoded ISINs** | Instrument key mappings may go stale after corporate actions (splits, bonus issues) | Manually update `upstox_client.py` with the current ISIN from nseindia.com |
-| **Single-user** | No authentication layer — the server is open to anyone on the local network | Run behind a firewall or on localhost only |
-| **Paper trading only** | No real order execution | By design — validate your strategy before considering live trading |
+| **Daily token expiry** | Upstox tokens expire at midnight IST | Run OAuth flow each morning via dashboard "Login to Upstox" |
+| **Hardcoded ISINs** | Instrument keys may go stale after corporate actions | Manually update `upstox_client.py` with current ISIN from nseindia.com |
+| **Single-user** | No authentication layer — server open to local network | Run behind a firewall or on localhost only |
+| **Paper trading only** | No real order execution | By design — validate strategy before Phase 14 go-live |
+| **Intraday 404s** | V3 candle endpoint returns 404 when market is closed | Expected — scanner falls back to daily data |
+| **LLM pipeline too slow for intraday** | 2–5 min per stock, can't react in real time | Fast technical layer (<1 sec) handles intraday; LLM used for research only |
 
 ---
 
-## Short-Term Enhancements
+## Phase Roadmap to Full Autonomy
+
+```
+CURRENT: Phase 0 — Baseline Testing (May 5–8, 2026)
+  5 trading days, target: ≥40% win rate, zero crashes
+    ↓
+Phase 10: Auto Paper Trading Bot         🟡 IN TESTING
+  (Scanner every 5 min, auto-enters/exits based on technical scores)
+    ↓
+Phase 11: Advanced Analytics Dashboard  ⏳ ~3–4 hours
+  (Sharpe, Sortino, Alpha vs NIFTY 50)
+    ↓
+Phase 12: Cloud Deployment              ⏳ ~2–3 hours
+  (24/7 uptime on VPS, Mumbai region, systemd service)
+    ↓
+Phase 13: 3-Month Paper Trading Period  ⏳ 3 months
+  (Prove edge: ≥50% win rate, Sharpe ≥0.7, max DD <15%)
+    ↓
+Phase 14: Go Live with Real Capital     ⏳ Operational
+  (₹10,000 starting capital, scale on consistency not streaks)
+    ↓
+GOAL: Fully autonomous trading bot. User = spectator.
+```
+
+---
+
+## Honest Expectations
+
+Before planning to deploy real capital, read this section carefully.
+
+### What Is Grounded and Achievable
+
+| Item | Why It's Real |
+|---|---|
+| Automated screener + scheduler | Pure engineering. Already done. Works today. |
+| Paper trading engine | Virtual portfolio with real prices. Standard. Done. |
+| Stop-loss / take-profit automation | Simple conditionals. Every algo platform does this. |
+| Cloud deployment | Standard DevOps. Nothing novel. |
+| Prediction tracking + accuracy dashboard | Just database + math. Done. |
+
+### What Needs Honest Expectations
+
+| Claim | The Reality |
+|---|---|
+| **"Win rate > 52%"** | After fees, slippage, and taxes, consistently beating 52% is **hard**. Most retail algo bots land at 45–55%. The edge is thin and fragile. |
+| **"Sharpe > 1.0"** | Most successful retail algos sit at 0.6–1.2 Sharpe. Retail bots hitting 1.5+ consistently would outperform most hedge funds. Be realistic. |
+| **"Self-improving after 100 trades"** | 100 trades is **statistically meaningless**. You need 500+ trades across different market regimes (bull, bear, sideways, high VIX) before signal weight changes are trustworthy. |
+| **"FII/DII flow as intraday signal"** | FII data is published at 6 PM. The market already moved. It's a lagging indicator — useful for context, not intraday entries. |
+| **"Capital doubling every 3 months"** | This implies ~100% annual return. Professional quant funds target 15–30% annually. Scale on **Sharpe stability**, not calendar dates. |
+| **"Full autonomy — user is spectator"** | Even Renaissance Technologies has human oversight. Full autonomy is a goal, not a state. The bot needs a **supervisor** (you), especially in the first year. |
+
+### Minimum Criteria to Go Live (Phase 14)
+
+| Metric | Minimum Threshold |
+|---|---|
+| Win Rate | > 50% after fees and slippage |
+| Sharpe Ratio | > 0.7 (> 1.0 is excellent but rare for retail) |
+| Max Drawdown | < 15% |
+| Profit Factor | > 1.2 |
+| Total Trades | > 200 across different market conditions |
+| Time Span | Must include at least one NIFTY correction (> -5%) |
+
+### Capital Scaling Plan
+
+| When | Capital | Condition |
+|---|---|---|
+| Start | ₹10,000 | Prove live mode works, find bugs |
+| After Sharpe ≥ 0.7 for 3 months | ₹25,000 | Scale only if performance holds |
+| After Sharpe ≥ 0.8 for 6 months | ₹50,000 | Max drawdown stayed < 12% |
+| After 1 year of live profit | ₹1,00,000 | Survived at least one correction |
+
+<Callout kind="alert">
+  Scale on consistency, not on winning streaks. A bot that made 8% last month might have just been lucky. A bot that made 1.5% every month for 6 months has an edge.
+</Callout>
+
+---
+
+## Short-Term Enhancements (Phase 11)
 
 <Columns cols={2}>
-  <Card title="Dynamic ISIN loader" icon="refresh-cw">
+  <Card title="Sharpe / Sortino / Calmar Ratios" icon="bar-chart-2">
+    Advanced risk-adjusted return metrics in the dashboard. Benchmark performance against NIFTY 50 to compute Alpha.
+  </Card>
+  <Card title="Consecutive Loss Circuit Breaker" icon="shield">
+    Pause scanner automatically after 3 consecutive losses. Resume after 30-minute cooldown.
+  </Card>
+  <Card title="Dynamic ISIN Loader" icon="refresh-cw">
     Download the full Upstox instruments JSON daily and auto-update mappings — no more stale ISINs after corporate actions.
   </Card>
-  <Card title="Batch signal endpoint" icon="layers">
-    A single endpoint to compute signals for all NIFTY 50 stocks in parallel, replacing the per-stock calls in the signal table.
+  <Card title="Telegram Alerts" icon="bell">
+    Push notifications for AUTO BUY / SELL signals, daily P&L summary, and error alerts.
   </Card>
-  <Card title="WebSocket price streaming" icon="radio">
-    Replace the 30-second polling interval in the Paper Trading view with real-time tick updates via the Upstox WebSocket feed.
+  <Card title="EOD Report Generator" icon="file-text">
+    Automated end-of-day summary: trades, P&L, win rate, tomorrow's watchlist. Saved as JSON and displayed in dashboard.
   </Card>
-  <Card title="Multi-LLM selector in UI" icon="cpu">
-    A dropdown to switch the AI pipeline between GPT-4, Claude, and Gemini without editing config files.
-  </Card>
-  <Card title="Richer predictions dashboard" icon="bar-chart-2">
-    Win rate trends over time, accuracy by market condition (uptrend/downtrend), and per-agent accuracy attribution.
-  </Card>
-  <Card title="Alert notifications" icon="bell">
-    Telegram or Discord notifications when the auto-scanner enters or exits a position, or detects a strong signal.
+  <Card title="WebSocket Live Prices" icon="radio">
+    Replace 5-second polling in the dashboard with real-time tick updates via the Upstox WebSocket V3 feed.
   </Card>
 </Columns>
 
 ---
 
-## Medium-Term Enhancements
+## Medium-Term Enhancements (Phase 12–13)
 
 | Enhancement | Benefit |
 |---|---|
+| **Cloud VPS deployment** | 24/7 uptime without leaving your PC on. AWS Lightsail or DigitalOcean (₹700–1,200/month, Mumbai region). |
 | **Backtesting engine** | Run any signal strategy against historical data before deploying it live |
-| **Options chain analysis** | IV percentile, max pain levels, put-call ratio for options traders |
-| **Portfolio heatmap** | Visual sector allocation view to spot concentration risk |
-| **Mobile-responsive UI** | Full support for monitoring and trading on mobile devices |
-| **Strategy builder** | Configure custom indicator combinations and thresholds without editing code |
+| **Correlation guard** | Block entry if new stock is > 0.75 correlated with an existing position |
+| **Earnings calendar veto** | Auto-skip stocks within 2 days of earnings announcement |
+| **India VIX filter** | Reduce position size when VIX > 20, halt new entries when VIX > 25 |
+| **Multi-timeframe confirmation** | Require signal alignment on 15-min + 1-hr + daily charts |
 
 ---
 
-## Long-Term Vision
+## Long-Term Vision (Phase 14+)
 
-| Enhancement | Benefit |
+| Enhancement | Notes |
 |---|---|
-| **Live order execution** | Graduate from paper trading to real Upstox orders with proper risk controls |
-| **Multi-exchange support** | BSE, MCX (commodities), and crypto exchange integration |
-| **AI memory system** | Agents learn from past prediction accuracy and adapt their analysis over time |
-| **Strategy marketplace** | Share and import community-built signal configurations |
-| **Cloud deployment** | Kubernetes-hosted multi-tenant version with per-user portfolios |
+| **Live order execution via Upstox** | `upstox_client.place_order()` is already coded. Just needs a feature flag and risk validation. |
+| **Self-improving signal weights** | Monthly (not weekly) weight adjustments based on 500+ trade patterns. Max ±0.03 change per cycle. |
+| **Interactive Telegram bot** | `/positions`, `/pnl`, `/stop`, `/report` commands |
+| **Options chain analysis** | IV percentile, max pain, put-call ratio (from NSE website scraping) |
+| **Multi-LLM selector** | Switch between GPT-4, Claude, Gemini in the dashboard without editing config files |
+
+---
+
+## The Core Trading Philosophy
+
+> **The LLM is the analyst. The rule engine is the trader. The risk manager is the adult in the room.**
+
+- LLMs generate ideas based on news, fundamentals, and sentiment
+- The fast rule engine decides whether those ideas are worth acting on (based on technical data)
+- Risk rules decide how much to bet
+- Stop-losses decide when to admit the bet was wrong
+- Trade logs make sure we learn from every mistake so we never make the same one twice
+
+**The hardest part isn't code — it's the waiting.** Trading is not about prediction. It's about managing the uncertainty that comes *after* you enter.
 
 ---
 
@@ -78,13 +197,13 @@ These are the current constraints you should be aware of before using TradeBotX 
     ```
   </Step>
   <Step title="Make focused changes" icon="edit" title-type="p">
-    Keep each PR to a single concern. Add tests for new indicator logic in `technical.py`.
+    Keep each PR to a single concern. Add tests for new indicator logic in `technical.py`. Run `pytest tests/` before submitting.
   </Step>
   <Step title="Open a pull request" icon="upload" title-type="p">
-    Describe what changed and why. Include before/after screenshots for any UI changes.
+    Describe what changed and why. Include before/after screenshots for any UI changes. Reference the relevant phase from the roadmap.
   </Step>
 </Steps>
 
 <Callout kind="tip">
-  The highest-value contributions right now are the **dynamic ISIN loader** and **batch signal endpoint** — both well-scoped with clear acceptance criteria.
+  The highest-value contributions right now are **Phase 11 analytics** (Sharpe/Sortino/Alpha dashboard) and the **consecutive loss circuit breaker** — both well-scoped with clear acceptance criteria.
 </Callout>
