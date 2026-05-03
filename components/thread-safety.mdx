@@ -1,75 +1,76 @@
 ---
 title: Thread Safety & Concurrency
-description: How TradeBotX prevents race conditions using three RLocks — their locations, what they protect, lock hierarchy, and safe/unsafe patterns.
+description: How TradeBotX prevents race conditions — asyncio.Lock for async endpoints, RLock for sync DB code, locked candle cache, and atomic OAuth token refresh.
 ---
 
 ## Overview
 
-TradeBotX uses three `threading.RLock()` instances to prevent data corruption when multiple threads access shared state simultaneously:
+TradeBotX uses a mix of `asyncio.Lock` and `threading.RLock` depending on the execution context. Using the wrong lock type in the wrong context was a critical bug — sync `RLock` inside `async def` blocks the entire event loop.
 
-| Lock | File | Protects |
-|---|---|---|
-| `_state_lock` | `api_server.py:53` | Upstox client + paper trader + scanner (global state) |
-| `_db_lock` | `paper_trader.py:131` | All SQLite reads and writes |
-| `_scanner_lock` | `signal_scanner.py:42` | Signal calculation + candle cache |
+| Lock | File | Type | Protects |
+|---|---|---|---|
+| `_state_lock` | `api_server.py:53` | `asyncio.Lock` | Upstox client + paper trader + scanner (global state) |
+| `_db_lock` | `paper_trader.py:131` | `threading.RLock` | All SQLite reads and writes (sync code) |
+| `_scanner_lock` | `signal_scanner.py:42` | `asyncio.Lock` | Signal calculation + candle cache |
 
-**Why RLock (reentrant) instead of Lock?** The same thread can acquire an RLock multiple times without deadlocking. This allows nested calls like `validate_trade()` → `enter_trade()` where both acquire `_state_lock`.
+<Callout kind="info">
+  **Why two lock types?** FastAPI endpoints run in an `asyncio` event loop — using a sync `threading.RLock` there blocks all other requests while the lock is held. `asyncio.Lock` yields control back to the event loop while waiting, allowing other requests to proceed. `paper_trader.py` is called synchronously, so `threading.RLock` is correct there.
+</Callout>
 
 ## Lock Hierarchy
 
 **Always acquire locks in this order:**
 
 ```
-1. _state_lock   (outermost)
-2. _db_lock
-3. _scanner_lock (innermost)
+1. _state_lock   (outermost — asyncio.Lock)
+2. _db_lock      (threading.RLock, called from within sync paper_trader methods)
+3. _scanner_lock (innermost — asyncio.Lock)
 ```
 
 Reversing this order causes deadlock. Never hold a lower lock and try to acquire a higher one.
 
 ```python
 # ✅ Safe patterns
-with _state_lock:
-    upstox_client.get_ltp(symbol)          # no DB needed
+async with _state_lock:
+    await upstox_client.get_ltp(symbol)          # no DB needed
 
-with _state_lock:
-    with paper_trader._db_lock:
-        paper_trader.enter_trade(...)      # state then DB
+async with _state_lock:
+    paper_trader.enter_trade(...)                 # enter_trade acquires _db_lock internally
 
-with _scanner_lock:
-    score = compute_signal_score(...)      # scanner alone
+async with _scanner_lock:
+    score = compute_signal_score(...)             # scanner alone
 
 # ❌ DEADLOCK — wrong order
-with paper_trader._db_lock:
-    with _state_lock:   # wrong! _state_lock must come first
+async with _db_lock:
+    async with _state_lock:   # wrong! _state_lock must come first
         ...
 
-with _scanner_lock:
-    with paper_trader._db_lock:  # wrong! _db_lock must come first
+async with _scanner_lock:
+    async with _db_lock:      # wrong! _db_lock must come first
         ...
 ```
 
 ## Lock 1 — `_state_lock` (API Server)
 
-Protects global objects in `api_server.py` that multiple HTTP endpoints and background jobs access:
-- `upstox_client` — Upstox REST client
-- `paper_trader` — paper trading engine
-- `upstox_config.access_token` — updated by OAuth callback
+`asyncio.Lock` protecting global objects in `api_server.py`. All 6 async HTTP endpoints and background jobs use `async with`:
 
 ```python
-# Every endpoint that touches global state:
+_state_lock = asyncio.Lock()   # ← asyncio.Lock, not threading.RLock
+
 @app.post("/api/paper/buy")
 async def buy(symbol: str, qty: int):
-    with _state_lock:
+    async with _state_lock:                           # ← async with
         if not paper_trader:
             raise HTTPException(503, "Paper trader not ready")
         result = paper_trader.enter_trade(symbol, qty, ...)
     return result
 ```
 
+**Why this matters:** With the old `threading.RLock`, every buy request blocked the event loop for the duration of the lock — other requests (scanner status polls, dashboard updates) had to wait in a queue. With `asyncio.Lock`, concurrent requests interleave properly.
+
 ## Lock 2 — `_db_lock` (Paper Trader)
 
-Prevents SQLite corruption when multiple threads read-modify-write the portfolio:
+`threading.RLock` — kept as RLock because `paper_trader.py` methods are called synchronously (not from within an async context directly). Prevents SQLite corruption when multiple threads read-modify-write the portfolio:
 
 ```
 Without lock (❌ Lost Update):
@@ -89,19 +90,40 @@ With lock (✅ Correct):
 
 **Rule:** Hold `_db_lock` for the **entire transaction** (SELECT + UPDATE together), never release between them.
 
-## Lock 3 — `_scanner_lock` (Signal Scanner)
+## Lock 3 — `_scanner_lock` (Signal Scanner + Candle Cache)
 
-Prevents two concurrent scan cycles from racing on the shared candle cache:
+`asyncio.Lock` protecting both signal calculation and the `_candle_cache` dictionary. The cache fix was critical — dict reads and writes without a lock create a TOCTOU race condition (check-time vs. use-time mismatch).
+
+```python
+_scanner_lock = asyncio.Lock()   # asyncio.Lock covers cache + scoring
+_candle_cache: dict[str, tuple] = {}
+
+async def get_cached_daily_candles(client, symbol, ttl_minutes=15):
+    async with _scanner_lock:                         # ← lock wraps cache access
+        if symbol in _candle_cache:
+            data, timestamp = _candle_cache[symbol]
+            if (now - timestamp).seconds < ttl_minutes * 60:
+                return data                           # cache hit (atomic read)
+
+        data = await client.get_candles_as_df(symbol, ...)
+        _candle_cache[symbol] = (data, now)           # atomic write
+        return data
+```
+
+<Callout kind="info">
+  Cache TTL was reduced from 60 minutes to 15 minutes. This ensures indicators respond to fast-moving intraday conditions while still keeping API calls well within the 1,000/day Upstox limit.
+</Callout>
+
+Non-blocking acquire on the scan-level lock prevents stacked scan cycles:
 
 ```python
 async def run_signal_scan(...):
-    # Non-blocking acquire — skip if already scanning
     if not scanner_state._scan_lock.acquire(blocking=False):
         logger.warning("Scan already running, skipping")
         return
 
     try:
-        with _scanner_lock:
+        async with _scanner_lock:
             ltps = await client.get_batch_ltp(symbols)
             for symbol, ltp in ltps.items():
                 candles = await get_cached_daily_candles(symbol)
@@ -110,40 +132,41 @@ async def run_signal_scan(...):
         scanner_state._scan_lock.release()
 ```
 
-Non-blocking acquire means: if a scan takes longer than 5 minutes, the next scheduled run is skipped rather than stacking up.
+## Lock 4 — OAuth Token Refresh (Atomic)
 
-## Candle Cache (60-min TTL)
+A fourth lock is passed into `validate_token()` to make all config mutations atomic. Without this, two concurrent token refresh calls could corrupt `upstox_config` mid-update (e.g., `is_valid = True` gets set before `access_token` is written):
 
 ```python
-_candle_cache: dict[str, tuple] = {}  # {symbol: (dataframe, timestamp)}
+# upstox_auth.py
+async def validate_token(config: UpstoxConfig, lock: asyncio.Lock = None):
+    result = await _hit_profile_endpoint(config.access_token)
 
-async def get_cached_daily_candles(client, symbol, ttl_minutes=60):
-    if symbol in _candle_cache:
-        data, timestamp = _candle_cache[symbol]
-        if (now - timestamp).seconds < ttl_minutes * 60:
-            return data   # cache hit
+    if lock:
+        async with lock:                   # all mutations happen atomically
+            config.is_valid = result.ok
+            config.user_name = result.user_name
+            config.email = result.email
+    else:
+        config.is_valid = result.ok        # fallback for callers without lock
 
-    data = await client.get_candles_as_df(symbol, ...)
-    _candle_cache[symbol] = (data, now)
-    return data
+# api_server.py — lock passed from the same _state_lock instance
+await validate_token(upstox_config, lock=_state_lock)
 ```
-
-Result: ~5–10 API calls per scan vs. 50+ without caching.
 
 ## Scenario: Dashboard Buy While Scanner Auto-Trades
 
 ```
-Thread 1 (HTTP endpoint):           Thread 2 (Scanner)
-POST /api/paper/buy                 run_signal_scan()
-  acquire _state_lock                 acquire _scanner_lock
-  acquire _db_lock                    compute signals...
-  INSERT paper_trades                 acquire _state_lock ← waits
-  UPDATE paper_portfolio              (blocked until Thread 1 releases)
-  release _db_lock                    acquire _db_lock
-  release _state_lock                 INSERT paper_trades
-                                      release _db_lock
-                                      release _state_lock
-                                      release _scanner_lock
+Thread 1 (HTTP endpoint):             Thread 2 (Scanner)
+POST /api/paper/buy                   run_signal_scan()
+  async with _state_lock                async with _scanner_lock
+  paper_trader.enter_trade(...)           compute signals...
+    (acquires _db_lock internally)        async with _state_lock ← awaits
+    INSERT paper_trades                   (yields; event loop runs other work)
+    UPDATE paper_portfolio              async with _db_lock
+    release _db_lock                    INSERT paper_trades
+  release _state_lock                   release _db_lock
+                                        release _state_lock
+                                        release _scanner_lock
 
 Result: ✅ Both trades complete correctly, capital decremented atomically
 ```
@@ -151,23 +174,31 @@ Result: ✅ Both trades complete correctly, capital decremented atomically
 ## Best Practices
 
 **Do:**
-- ✅ Use `with lock:` context managers — auto-releases on exception
-- ✅ Hold locks briefly (< 100 ms) — move slow I/O outside the lock
+- ✅ Use `async with lock:` in all `async def` functions — never `with lock:`
+- ✅ Use `with lock:` (sync) only in plain `def` functions called outside the event loop
+- ✅ Hold locks briefly — move slow I/O outside the lock
 - ✅ Follow hierarchy: `_state_lock` → `_db_lock` → `_scanner_lock`
-- ✅ Use RLock everywhere — safe for same-thread re-acquisition
+- ✅ Pass lock into functions that mutate shared config (e.g., `validate_token`)
 
 **Don't:**
-- ❌ Do HTTP requests or file I/O inside locks — blocks all other threads
+- ❌ Use `threading.RLock` inside `async def` — blocks the entire event loop
+- ❌ Use `asyncio.Lock` inside plain sync `def` called from threads — deadlock
+- ❌ Do HTTP requests or file I/O while holding a lock — blocks all other tasks
 - ❌ Reverse lock acquisition order — deadlock
-- ❌ Use bare `lock.acquire()` without `try/finally` — easy to forget release
-- ❌ Mix async and sync locks — sync RLock inside `async def` blocks the event loop
-  ```python
-  # ✅ Correct in async context:
-  async def my_handler():
-      data = await upstox_client.get_ltp(symbols)  # async I/O outside lock
-      with _state_lock:                             # sync lock for quick DB op
-          paper_trader.enter_trade(...)
-  ```
+- ❌ Use bare `lock.acquire()` without `try/finally` — leaks lock on exception
+
+```python
+# ✅ Correct pattern in async context:
+async def my_handler():
+    data = await upstox_client.get_ltp(symbols)   # async I/O outside lock
+    async with _state_lock:                        # then lock for quick state write
+        paper_trader.enter_trade(...)
+
+# ❌ Wrong — sync lock in async context:
+async def my_handler():
+    with _state_lock:                              # blocks event loop!
+        ...
+```
 
 ## Testing Thread Safety
 

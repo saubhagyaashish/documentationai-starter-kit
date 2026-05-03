@@ -185,6 +185,35 @@ def compute_signal_score(daily_bars, intraday_bars):
     return min(1.0, score / 100.0)          # Normalise to 0–1.0
 ```
 
+## Confidence-Based Position Sizing
+
+Position size scales with signal strength instead of a flat 3% for every trade. Higher-conviction signals get larger allocation; weak signals get smaller:
+
+| Score | Position Size | Example (₹100,000 capital) |
+|---|---|---|
+| 0.65 – 0.70 | 0.5% | ₹500 |
+| 0.70 – 0.75 | 1.0% | ₹1,000 |
+| 0.75 – 0.85 | 2.0% | ₹2,000 |
+| 0.85 – 0.95 | 3.0% | ₹3,000 |
+| 0.95 – 1.00 | 5.0% | ₹5,000 |
+| + Agent agreement bonus | +25% of base size | e.g., 3% → 3.75% |
+
+**Agent agreement bonus:** If the stock appeared in today's `morning_report.json` (i.e., the 13-agent LLM pipeline also rated it BUY), position size gets a 25% bonus on top of the base size. This rewards convergence between the fast technical scanner and the slower LLM analysis.
+
+```python
+def get_position_size(score: float, capital: float, agent_agreed: bool) -> float:
+    if score >= 0.95:   base_pct = 0.05
+    elif score >= 0.85: base_pct = 0.03
+    elif score >= 0.75: base_pct = 0.02
+    elif score >= 0.70: base_pct = 0.01
+    else:               base_pct = 0.005
+
+    if agent_agreed:
+        base_pct *= 1.25   # +25% bonus for LLM confirmation
+
+    return capital * base_pct
+```
+
 ## Real Example — INFY.NS, May 3 2026, 10:15 AM
 
 | Indicator | Value | Points |

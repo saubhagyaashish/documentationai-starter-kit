@@ -19,6 +19,7 @@ TradeBotX uses **Upstox V2 and V3 APIs** as its exclusive source of live Indian 
 - ✅ Live and Sandbox modes
 - ✅ Batch LTP for 50 stocks in a single API call
 - ✅ WebSocket authorization for real-time market data
+- ✅ Atomic token refresh — concurrent callbacks can't corrupt config mid-update
 
 ## Token Lifecycle
 
@@ -26,9 +27,9 @@ TradeBotX uses **Upstox V2 and V3 APIs** as its exclusive source of live Indian 
 1. INITIALIZATION (api_server.py startup)
    ├── load_config_from_env()
    │   └── Reads UPSTOX_ACCESS_TOKEN from .env
-   ├── validate_token(config)
+   ├── validate_token(config, lock=_state_lock)   ← lock passed in
    │   └── Hits /v2/user/profile to verify token
-   │       └── On success: set config.is_valid = True
+   │       └── On success: atomically sets config.is_valid, user_name, email
    │       └── On failure: log warning, disable Upstox features
    └── Token ready for all API calls
 
@@ -40,6 +41,7 @@ TradeBotX uses **Upstox V2 and V3 APIs** as its exclusive source of live Indian 
    ├── Redirects to Upstox → user grants permission
    ├── Backend exchanges code for new access_token
    ├── persist_token_to_env(new_token)
+   ├── validate_token(config, lock=_state_lock)   ← atomic re-validation
    └── Token saved to .env + in-memory config (no restart needed)
 ```
 
@@ -256,14 +258,14 @@ TradeBotX maintains hardcoded mappings in `upstox_client.py` for **NIFTY 50** (5
 
 TradeBotX minimises rate-limit usage through:
 - **Batch LTP calls** — 50 stocks in 1 API call per scan
-- **Candle cache** — 60-minute TTL in `signal_scanner.py` (`_candle_cache`)
+- **Candle cache** — 15-minute TTL in `signal_scanner.py` (`_candle_cache`), protected by `_scanner_lock`
 - **On-demand scoring** — indicators computed only on stocks that moved > 0.5%
 
 ### Candle Cache Performance
 
 ```
-Without caching: 50 API calls per 5-min scan = 288 × 50 = 14,400 calls/day
-With 60-min cache: ~5–10 API calls per scan = ~300 calls/day
+Without caching:  50 API calls per 5-min scan = 288 × 50 = 14,400 calls/day
+With 15-min cache: ~5–10 API calls per scan  = ~300–600 calls/day  (still within 1,000/day limit)
 ```
 
 ## Error Handling
@@ -282,10 +284,12 @@ With 60-min cache: ~5–10 API calls per scan = ~300 calls/day
 ```python
 from upstox_auth import load_config_from_env, validate_token
 from upstox_client import UpstoxClient
+import asyncio
 
-# Load and validate token
+# Load and validate token atomically
+_state_lock = asyncio.Lock()
 config = load_config_from_env()
-is_valid = await validate_token(config)
+is_valid = await validate_token(config, lock=_state_lock)  # atomic — safe under concurrent calls
 
 if is_valid:
     client = UpstoxClient(config)
@@ -307,7 +311,7 @@ if is_valid:
 **Do:**
 - ✅ Validate token on every server startup
 - ✅ Use batch endpoints (`get_batch_ltp`) — far fewer API calls
-- ✅ Cache candles with 60-min TTL
+- ✅ Cache candles with 15-min TTL (reduced from 60 min for better intraday responsiveness)
 - ✅ Test in sandbox before switching to live
 - ✅ Keep `.env` out of Git (add to `.gitignore`)
 

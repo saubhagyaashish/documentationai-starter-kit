@@ -143,6 +143,47 @@ Keeps P&L fresh without waiting for a trade to execute:
 
 Runs all day (including post-market) so the dashboard always shows current values.
 
+## Data Validation — `candle_validator.py`
+
+Before any indicator runs on a stock, `candle_validator.py` checks the raw OHLCV data. Stocks that fail validation are skipped — no signal is computed, no trade is entered.
+
+| Check | Rule | Why |
+|---|---|---|
+| Sufficient history | ≥ 50 daily bars required | MACD needs 26, RSI needs 14 — need buffer |
+| Valid OHLC | `High ≥ Low` on every bar | Corrupt feed detection |
+| No extreme gaps | Price gap < 10% between bars | Detects stock splits / bonus issues |
+| Non-zero volume | Volume > 0 on all bars | Prevents division-by-zero in volume ratio |
+
+```python
+from candle_validator import validate_candles
+
+candles = await get_cached_daily_candles(client, symbol)
+if not validate_candles(candles):
+    logger.warning(f"SKIP {symbol}: failed data validation")
+    continue                             # silently skipped before → now explicitly logged
+
+score = compute_signal_score(candles, intraday_bars)
+```
+
+<Callout kind="info">
+  Previously, stocks with bad data silently produced garbage scores and could trigger incorrect trades. Now they are detected and skipped with a log entry explaining why.
+</Callout>
+
+## Decision Logging
+
+Every scan cycle now logs the reason a trade did or did not happen. Previously, most non-trade decisions were silent.
+
+```
+[SCAN] INFY.NS — score 0.72 → AUTO BUY 5 shares @ ₹1850 (score > threshold 0.65)
+[SCAN] TCS.NS  — score 0.61 → HOLD (below threshold 0.65)
+[SCAN] HDFC.NS — score 0.68 → SKIP: max positions (3) already open
+[SCAN] SBIN.NS — score 0.71 → SKIP: daily loss limit active (circuit breaker)
+[SCAN] WIPRO.NS — SKIP: failed data validation (insufficient history: 41 bars)
+[SCAN] RELIANCE.NS — score 0.41 → EXIT open position (score < sell threshold 0.35)
+```
+
+This creates a full decision trail in the logs, making it easy to diagnose why the scanner was or wasn't trading on any given day.
+
 ## Configuration Presets
 
 <Tabs>
@@ -207,11 +248,14 @@ if not is_trading_day(today):
 
 ## API Cost per Day
 
+Cache TTL was reduced from 60 minutes to 15 minutes. This increases candle refresh API calls but all totals remain within the Upstox 1,000/day limit:
+
 ```
-Morning scan (08:30):  ~15 API calls
-Signal scanner (5 min): ~5–10 calls/scan × 24 scans = ~300 calls
-Portfolio update:        ~1 call/5 min × 288 = 288 calls
-Total: ~300–600 calls/day  (well within Upstox 1,000/day limit)
+Morning scan (08:30):      ~15 API calls
+Signal scanner (5 min):    ~5–10 calls/scan × 24 scans = ~300 calls
+Candle cache refreshes:    ~4× more frequent (15-min TTL vs 60-min) = ~80 extra calls
+Portfolio update:           ~1 call/5 min × 288 = 288 calls
+Total: ~400–700 calls/day  (within Upstox 1,000/day limit)
 ```
 
 ## Troubleshooting
@@ -219,8 +263,10 @@ Total: ~300–600 calls/day  (well within Upstox 1,000/day limit)
 | Issue | Fix |
 |---|---|
 | Morning scan never runs | Check `logger.info("Scheduler started")` in startup logs |
-| Scanner runs but no trades | `"enabled": false` in config — set to `true` and restart |
+| Scanner runs but no trades | Check logs for `SKIP` reasons — position limit, score below threshold, data validation failure |
+| `"enabled": false` in config | Set to `true` in `config.json` and restart |
 | "Scan already running" warning | Previous scan still in progress — normal if stocks are slow |
+| `SKIP: failed data validation` | Stock has < 50 bars or bad OHLC — expected for newly listed stocks |
 | Duplicate jobs | Check `add_job()` calls in `api_server.py` — remove duplicates |
 | Force close not happening | Verify `"force_close_time": "15:20"` in config.json |
 | No trades on holiday | Expected — `nse_holidays.py` blocks trading on NSE holidays |
