@@ -238,15 +238,20 @@ Based on 100+ trades in April 2026:
 | Threshold | Win Rate | Avg Trade | Trades/Day |
 |---|---|---|---|
 | 0.55 | 48% | +0.8% | 4–5 |
-| **0.65 (default)** | **52%** | **+1.1%** | **2–3** |
+| **0.60 (Phase 0 current)** | **TBD** | **TBD** | **2–4** |
+| 0.65 (original default) | 52% | +1.1% | 2–3 |
 | 0.75 | 56% | +1.5% | 0–1 |
 | 0.85 | 62% | +2.1% | < 0.5 |
+
+<Callout kind="info">
+  During Phase 0 live testing (May 4, 2026), NIFTY 50 top scores consistently clustered at **0.60–0.62**. The original threshold of 0.65 would have produced zero trades. The threshold was lowered to 0.60 to collect real trading data during Phase 0. It will be tuned based on observed win rate after 5 days.
+</Callout>
 
 Adjust in `config.json`:
 ```json
 {
   "scanner": {
-    "buy_score_threshold": 0.65,
+    "buy_score_threshold": 0.60,
     "sell_score_threshold": 0.35
   }
 }

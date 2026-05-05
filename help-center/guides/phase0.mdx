@@ -1,6 +1,6 @@
 ---
 title: Phase 0 — Baseline Testing Checklist
-description: 5-day baseline testing plan for the TradeBotX signal scanner (May 5–8 2026) — setup, daily metrics, success criteria, and troubleshooting.
+description: 5-day baseline testing plan for the TradeBotX signal scanner (May 5–8 2026) — setup, daily metrics, success criteria, and day-by-day results.
 ---
 
 ## Overview
@@ -11,30 +11,145 @@ description: 5-day baseline testing plan for the TradeBotX signal scanner (May 5
   **Success:** ≥40% win rate, zero crashes, metrics recorded for all 5 days
 </Callout>
 
+## Day 1 Results — May 4, 2026 ✅
+
+<Callout kind="alert">
+  **3 critical bugs found and fixed on Day 1.** The 0% win rate is not representative — 3 of 4 losses were administrative (manual EOD close due to Bug #3), not real signal failures.
+</Callout>
+
+| Metric | Value |
+|---|---|
+| Capital | ₹100,000 → ₹99,962.77 (-₹37.23, -0.04%) |
+| Trades | 4 buys, 4 sells |
+| Win Rate | 0% (4 losses, 0 wins) |
+| Real loss | -₹32.55 (BAJFINANCE trailing stop) |
+| Admin losses | -₹4.68 (3 manual EOD closes — Bug #3) |
+| Bugs found | 3 critical |
+| Bugs fixed | 3 critical |
+
+### Trade P&L Breakdown
+
+| Symbol | Qty | Entry | Exit | P&L | Reason |
+|---|---|---|---|---|---|
+| BAJFINANCE | 3 | ₹960.03 | ₹949.18 | -₹32.55 | TRAILING_STOP (-1.13%) |
+| POWERGRID | 9 | ₹321.96 | ₹321.80 | -₹1.44 | MANUAL_EOD_CLOSE (-0.05%) |
+| LT | 1 | ₹4,119.86 | ₹4,117.80 | -₹2.06 | MANUAL_EOD_CLOSE (-0.05%) |
+| TATACONSUM | 2 | ₹1,172.19 | ₹1,171.60 | -₹1.18 | MANUAL_EOD_CLOSE (-0.05%) |
+
+The 3 manual closes happened because Bug #3 (staggered force-close) didn't trigger at 15:18–15:20. Positions were still open at 4:24 PM and had to be closed manually. With Bug #3 fixed, Day 2 onwards will have automatic EOD close.
+
+### Score Distribution Observed (Day 1)
+
+Top stocks were consistent across all 36 scans:
+
+| Symbol | Score | Trend | Action |
+|---|---|---|---|
+| POWERGRID | 0.621 | NEUTRAL | Bought |
+| BAJFINANCE | 0.616 | NEUTRAL | Bought |
+| LT | 0.605 | NEUTRAL | Bought |
+| DRREDDY | 0.605 | NEUTRAL | Skipped (moving DOWN) |
+| TATACONSUM | 0.604 | NEUTRAL | Bought |
+| BAJAJ-AUTO | 0.655 | NEUTRAL | Skipped (moving DOWN) |
+
+**Key finding:** All scores clustered between 0.55–0.65. The original threshold of 0.65 would have produced **zero trades all day**. Threshold was lowered to 0.60 mid-day after adding `top_scores` diagnostics.
+
+### Bugs Fixed on Day 1
+
+<Expandable title="Bug #1 — BUY code in wrong branch (CRITICAL)" icon="alert-triangle">
+  **File:** `signal_scanner.py`  
+  **Symptom:** 22 scans, 0 trades despite valid scores (0.60–0.62)
+
+  The BUY execution code was accidentally placed inside the `elif` branch (runs when conditions *don't* match) instead of the `if` branch. This meant the bot would **never trade**.
+
+  ```python
+  # BROKEN — buy code in elif (never executed):
+  if score >= buy_threshold and conditions_met:
+      continue  # no buy here!
+  elif score >= buy_threshold:
+      paper_trader.enter_trade(...)  # ← unreachable
+
+  # FIXED — buy code in correct if branch:
+  if score >= buy_threshold and conditions_met:
+      paper_trader.enter_trade(...)  # ← correct
+  elif score >= buy_threshold:
+      logger.info("SKIP: %s", ", ".join(reasons))
+  ```
+
+  **Fix verified:** First trade (TATACONSUM) executed within minutes.
+</Expandable>
+
+<Expandable title="Bug #2 — Profit factor crash on null avg_win (HIGH)" icon="alert-triangle">
+  **File:** `paper_trader.py:678`  
+  **Symptom:** `/api/paper/performance` returns HTTP 500 when only losses exist
+
+  After BAJFINANCE closed at a loss (the only closed trade), `avg_win` was `None` from the SQL query. The code divided `None / avg_loss` → `TypeError`.
+
+  ```python
+  # BROKEN:
+  "profit_factor": round(abs(avg_win / avg_loss), 2) if avg_loss != 0 else None
+  # avg_win could be None even when avg_loss is valid
+
+  # FIXED:
+  "profit_factor": round(abs(avg_win / avg_loss), 2)
+      if (avg_win is not None and avg_loss is not None and avg_loss != 0) else None
+  ```
+
+  Now works correctly with: only losses, only wins, mixed, or no trades.
+</Expandable>
+
+<Expandable title="Bug #3 — Staggered force-close never triggered (HIGH)" icon="alert-triangle">
+  **File:** `signal_scanner.py:521`  
+  **Symptom:** 3 positions still open at 4:24 PM (should have closed at 15:18–15:20)
+
+  The code compared `current_time in STAGGERED_CLOSE_TIMES` which requires an **exact match including seconds**. Scans run at :31, :32, :33 seconds — never exactly :00.
+
+  ```python
+  # BROKEN — time(15,19,32) != time(15,19,0):
+  if current_time in [time(15,18), time(15,19), time(15,20)]:
+      close_positions()
+
+  # FIXED — hour:minute matching + past-close fallback:
+  current_hm = (now.hour, now.minute)
+  close_minutes = [(t.hour, t.minute) for t in STAGGERED_CLOSE_TIMES]
+
+  if current_hm in close_minutes or current_hm >= close_minutes[-1]:
+      close_positions()
+  ```
+
+  **Impact:** From Day 2 onwards, positions close automatically at 15:18–15:20.
+</Expandable>
+
+### Config Change — Threshold 0.65 → 0.60
+
+The original `buy_score_threshold: 0.65` was too high for Phase 0. Top NIFTY 50 scores clustered at 0.60–0.62 throughout the day. Threshold was lowered to ensure trades happen during testing:
+
+```json
+{
+  "scanner": {
+    "buy_score_threshold": 0.60,
+    "sell_score_threshold": 0.35
+  }
+}
+```
+
+This threshold will be tuned back up (or down) based on 5-day data.
+
+---
+
 ## Setup (Before Market Opens)
 
 <Steps>
-  <Step title="Enable scanner in config.json" icon="settings" title-type="p">
-    Open `D:\TradingAgents\config.json` and add/update the scanner section:
+  <Step title="Re-do Upstox OAuth login" icon="key" title-type="p">
+    Upstox tokens expire at **midnight IST daily** (sometimes 3:30 AM IST). Always re-authenticate before the market opens.
 
-    ```json
-    {
-      "scanner": {
-        "enabled": true,
-        "interval_minutes": 5,
-        "index": "NIFTY50",
-        "buy_score_threshold": 0.65,
-        "sell_score_threshold": 0.35,
-        "max_auto_positions": 3,
-        "position_size_pct": 3.0,
-        "force_close_time": "15:20"
-      }
-    }
-    ```
+    Open the dashboard at `http://localhost:5173` and click **"Login to Upstox"**. If the server isn't running yet, start it first (Step 2).
+
+    <Callout kind="alert">
+      On first run, you may need to create a new Upstox app with your **public IP** as the redirect URI if running on a non-localhost machine.
+    </Callout>
   </Step>
   <Step title="Start the API server" icon="terminal" title-type="p">
     ```powershell
-    # Terminal 1
     python api_server.py
     ```
 
@@ -48,13 +163,24 @@ description: 5-day baseline testing plan for the TradeBotX signal scanner (May 5
     Auto-scanner resumed (was enabled in config)
     ```
   </Step>
-  <Step title="Verify the API is live" icon="check-circle" title-type="p">
-    ```bash
-    # Terminal 2
-    curl http://localhost:8000/api/paper/performance
+  <Step title="Verify all 4 status indicators are green" icon="check-circle" title-type="p">
+    Check `curl http://localhost:8000/api/scanner/status` and `curl http://localhost:8000/api/paper/performance`. All should return valid JSON with no errors.
+  </Step>
+  <Step title="Enable scanner in config.json" icon="settings" title-type="p">
+    ```json
+    {
+      "scanner": {
+        "enabled": true,
+        "interval_minutes": 5,
+        "index": "NIFTY50",
+        "buy_score_threshold": 0.60,
+        "sell_score_threshold": 0.35,
+        "max_auto_positions": 3,
+        "position_size_pct": 3.0,
+        "force_close_time": "15:20"
+      }
+    }
     ```
-
-    Should return JSON with current capital, P&L, and trade count.
   </Step>
 </Steps>
 
@@ -62,25 +188,36 @@ description: 5-day baseline testing plan for the TradeBotX signal scanner (May 5
 
 ### Before Market Opens (09:30 IST)
 
-- [ ] API server is running (`localhost:8000` responds)
-- [ ] Scanner is active — check `curl http://localhost:8000/api/scanner/status`
-- [ ] `/api/paper/performance` returns valid data
+- [ ] Re-do Upstox OAuth login (token expired overnight)
+- [ ] Start `python api_server.py`
+- [ ] Verify all status indicators are green
+- [ ] Click "Start Bot" in dashboard
+- [ ] Confirm scanner is running (`is_running: true`)
 
 ### During Market Hours (09:30–15:20 IST)
 
-- [ ] Monitor scanner logs in Terminal 1 for `AUTO BUY` / `SELL` messages
-- [ ] Note any `ERROR` or `EXCEPTION` lines in logs
+- [ ] **DO NOT modify any code files** — `uvicorn --reload` resets scanner state and interrupts active scans
+- [ ] Monitor dashboard occasionally for positions and P&L
+- [ ] Watch for `AUTO BUY` / `SELL` / `SKIP` in logs
+- [ ] Check `top_scores` in `scanner_log.json` if no trades after 30 minutes
 
-### After Market Closes (15:20+ IST)
+### End of Day (15:18–15:30 IST)
 
-Collect end-of-day metrics:
+- [ ] Watch staggered close happen automatically (15:18, 15:19, 15:20) — fixed in Day 1
+- [ ] Verify all positions closed (`open_positions: 0` in scanner status)
+- [ ] Note final P&L
 
+### Post-Market
+
+Collect metrics:
 ```bash
 curl http://localhost:8000/api/paper/performance | python -m json.tool
+
+# Or use the database viewer:
+python view_db.py
 ```
 
 Record in `PHASE_0_RESULTS.md`:
-
 ```
 Day X (YYYY-MM-DD):
 - Win rate: XX% (Y wins, Z losses)
@@ -91,16 +228,6 @@ Day X (YYYY-MM-DD):
 - Status: OK / ERRORS
 - Notes: [any issues]
 ```
-
-Key fields to copy from the API response:
-
-| Field | Meaning |
-|---|---|
-| `win_rate` | Win rate % |
-| `trades_today` | Total trades this day |
-| `daily_pnl` | P&L in rupees |
-| `avg_pnl_per_trade` | Average P&L per trade |
-| `consecutive_losses` | Max consecutive losing trades |
 
 ## Success Criteria
 
@@ -113,31 +240,45 @@ All five must pass after 5 trading days:
 - [ ] Scanner ran every 5 minutes during market hours
 
 <Callout kind="alert">
-  If **any criterion fails**, debug the scanner logic before proceeding to Phase 1. Win rate < 40% is expected for the baseline — document it and Phase 1–2 improvements will address it.
+  If **any criterion fails**, debug the scanner logic before proceeding to Phase 1. Win rate < 40% is expected for baseline — document and Phase 1–2 will improve it.
 </Callout>
 
 ## Key Files to Monitor
 
 | File | Contains |
 |---|---|
-| Terminal 1 logs | Real-time scanner activity (`AUTO BUY`, `SELL`, errors) |
-| `scanner_log.json` | Last scan results (scores, decisions) |
+| Terminal 1 logs | Real-time `AUTO BUY`, `SELL`, `SKIP` decisions with reasons |
+| `scanner_log.json` | Last scan results including `top_scores` (top 5 stocks by score) |
 | `predictions.db → paper_trades` | All executed trades (open and closed) |
+| `view_db.py` | Database viewer — run `python view_db.py` for a formatted summary |
 
 ```bash
 # Query all trades for today
 sqlite3 predictions.db "SELECT symbol, direction, entry_price, exit_price, pnl FROM paper_trades WHERE DATE(entry_time) = DATE('now');"
 ```
 
+## Lessons Learned (Day 1)
+
+1. **Don't modify code during market hours.** Every file save triggers `uvicorn --reload`, resetting scanner state and interrupting active scans. Make all changes before 09:30 or after 15:30.
+
+2. **Phase 0 needs actual trades.** A conservative threshold that produces 0 trades gives no data. Lower the threshold until 2–4 trades/day happen, then tune up from there.
+
+3. **`top_scores` logging is essential.** Without tracking the top 5 scores per scan, you can't diagnose why the bot isn't trading. Always check `scanner_log.json` if no trades appear after 30 minutes.
+
+4. **Time comparisons need minute-level matching.** `time(15,19,32) != time(15,19,0)` — scans don't fire at exactly :00 seconds. Always compare `(hour, minute)` tuples for schedule logic.
+
+5. **Risk management worked.** BAJFINANCE's trailing stop limited a loss to -₹32.55 instead of letting it grow. The circuit breaker is doing its job.
+
 ## Troubleshooting
 
 | Issue | Solution |
 |---|---|
-| Scanner not starting | Check Upstox token in `.env`. Run `python upstox_auth.py` to re-authenticate. |
-| No trades entered | Lower `buy_score_threshold` in config (e.g., 0.60). Scores may be conservative. |
-| API returns 500 | Check terminal logs — likely missing Upstox token or database corruption. |
-| Win rate < 40% | Expected for baseline. Document and proceed to Phase 1 anyway. |
-| Crash during trading | Check logs for exceptions — common causes: slippage rounding, position size calculation, SL/TP logic. |
+| Scanner not starting | Re-do Upstox OAuth — token likely expired. Run `python api_server.py` and check logs. |
+| No trades after 30 min | Check `top_scores` in `scanner_log.json`. If scores < threshold, lower `buy_score_threshold` in `config.json`. |
+| API returns 500 | Check terminal logs. Fixed Bug #2 means this should no longer happen on performance endpoint. |
+| Positions open after 15:20 | Bug #3 fixed — should auto-close. If still open, run `python view_db.py` to inspect, then close manually. |
+| Win rate 0% | Check if losses are real (signal reversals) or admin (manual closes, slippage). Day 1 had 3 admin losses. |
+| `uvicorn --reload` mid-day | Expected if you saved a file. Restart scanner: click "Start Bot" in dashboard. |
 
 ## Next Steps
 
@@ -147,3 +288,4 @@ sqlite3 predictions.db "SELECT symbol, direction, entry_price, exit_price, pnl F
 |---|---|
 | All criteria pass | Create `PHASE_1_CHECKLIST.md` and wire the feedback loop (already coded — just verify). |
 | Any criterion fails | Debug scanner logic or signal score computation. Re-run Phase 0. |
+| Threshold seems wrong | Run `backtest.py` on historical data to find the optimal threshold before changing it live. |

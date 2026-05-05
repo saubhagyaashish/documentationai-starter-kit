@@ -3,6 +3,23 @@ title: Roadmap & Known Limitations
 description: Current project status, phase roadmap to full autonomy, known limitations, and an honest assessment of what's achievable.
 ---
 
+## Phase 0 — Day 1 Report (May 4, 2026)
+
+First live trading day. Three critical bugs found and fixed during market hours.
+
+| Metric | Value |
+|---|---|
+| Capital | ₹100,000 → ₹99,962.77 (-₹37.23) |
+| Trades | 4 (all losses — 1 real, 3 admin EOD closes) |
+| Real loss | -₹32.55 BAJFINANCE trailing stop |
+| Bugs fixed | BUY branch logic, profit_factor null crash, staggered force-close timing |
+| Config change | `buy_score_threshold` 0.65 → 0.60 (top NIFTY scores clustered at 0.60–0.62) |
+| New tooling | `top_scores` in scan results, `view_db.py` database viewer |
+
+**Takeaway:** 0% win rate not representative — 3 of 4 losses were from the force-close bug (manual exit at flat prices). Day 2+ will have clean data.
+
+---
+
 ## Current Status (May 2026)
 
 ### Completed Phases ✅
@@ -16,7 +33,7 @@ description: Current project status, phase roadmap to full autonomy, known limit
 
 ### In Progress 🟡
 
-- **Phase 10 — Auto Paper Trading Bot:** Scanner runs every 5 min, auto-enters/exits based on technical signals. Implementation done. **Phase 0 testing: May 5–8, 2026** (5 trading days, target ≥ 40% win rate, zero crashes).
+- **Phase 10 — Auto Paper Trading Bot:** Scanner live since May 4. Phase 0 testing running **May 4–8, 2026** (5 trading days, target ≥ 40% win rate, zero crashes). Day 1 complete — 3 critical bugs fixed.
 
 ### Planned Phases ⏳
 

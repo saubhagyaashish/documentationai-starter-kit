@@ -126,12 +126,21 @@ curl http://localhost:8000/api/scanner/status          # Check state
 ```json
 {
   "is_running": true,
-  "last_scan_time": "2026-05-03T10:45:00+05:30",
+  "last_scan_time": "2026-05-04T11:29:08+05:30",
   "open_positions": 2,
   "daily_pnl": 1500,
-  "auto_trades_today": 3
+  "auto_trades_today": 3,
+  "top_scores": [
+    {"symbol": "POWERGRID", "score": 0.621, "trend": "NEUTRAL", "pct_change": 2.48},
+    {"symbol": "BAJFINANCE", "score": 0.616, "trend": "NEUTRAL", "pct_change": 2.29},
+    {"symbol": "LT",         "score": 0.605, "trend": "NEUTRAL", "pct_change": 2.28},
+    {"symbol": "TATACONSUM", "score": 0.604, "trend": "NEUTRAL", "pct_change": 1.71},
+    {"symbol": "ONGC",       "score": 0.598, "trend": "NEUTRAL", "pct_change": -1.83}
+  ]
 }
 ```
+
+`top_scores` returns the top 5 stocks by signal score on the last scan. This is the primary diagnostic tool for understanding why the bot is or isn't trading — if all top scores are below `buy_score_threshold`, no trades will happen regardless of how long you wait.
 
 ## Job 3 — Portfolio Update (Every 5 min)
 
